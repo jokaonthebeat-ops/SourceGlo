@@ -1,0 +1,177 @@
+/*
+    HeaderComponent - premium logo, preset navigation, save/undo utilities,
+    settings, help and power. Bounds: layout::header {6,4,1479,64}; all child
+    coordinates below are header-local (design px minus the header origin).
+*/
+
+#pragma once
+#include "Widgets.h"
+#include "../PluginProcessor.h"
+
+namespace sourceglo
+{
+
+class HeaderComponent : public juce::Component
+{
+public:
+    explicit HeaderComponent (SourceGloProcessor& p) : processor (p)
+    {
+        setTitle ("Header");
+
+        auto initIcon = [this] (IconButton& b, const juce::String& tip)
+        {
+            b.setTooltip (tip);
+            addAndMakeVisible (b);
+        };
+
+        prevButton.setTooltip ("Previous preset");
+        nextButton.setTooltip ("Next preset");
+        prevButton.setBoxed (true);
+        nextButton.setBoxed (true);
+        prevButton.setIconPadding (12.0f);
+        nextButton.setIconPadding (12.0f);
+        addAndMakeVisible (prevButton);
+        addAndMakeVisible (nextButton);
+        prevButton.onClick = [this] { processor.selectPreset (processor.getPresetIndex() - 1); repaint(); };
+        nextButton.onClick = [this] { processor.selectPreset (processor.getPresetIndex() + 1); repaint(); };
+
+        saveButton.setLeftAligned (true);
+        saveAsButton.setLeftAligned (true);
+        saveButton.setIconPadding (6.0f);
+        saveAsButton.setIconPadding (6.0f);
+        initIcon (saveButton,     "Save preset");
+        initIcon (saveAsButton,   "Save preset as...");
+        initIcon (undoButton,     "Undo");
+        initIcon (redoButton,     "Redo");
+        initIcon (settingsButton, "Settings");
+        initIcon (helpButton,     "Help");
+        initIcon (powerButton,    "Power / bypass");
+
+        undoButton.onClick = [this] { processor.getUndoManager().undo(); };
+        redoButton.onClick = [this] { processor.getUndoManager().redo(); };
+
+        settingsButton.onClick = [this] { showSettingsMenu(); };
+        helpButton.onClick = [this] { showAbout(); };
+
+        powerButton.setClickingTogglesState (false);
+        powerButton.onClick = [this]
+        {
+            if (auto* param = processor.getAPVTS().getParameter (pid::bypass))
+                param->setValueNotifyingHost (param->getValue() > 0.5f ? 0.0f : 1.0f);
+            repaint();
+        };
+
+        onScalePreset = [] (float) {};
+    }
+
+    std::function<void (float)> onScalePreset;   // wired by the editor
+
+    void resized() override
+    {
+        // The mockup places the preset cluster ~28 px right of the layout
+        // JSON's rects; the reference image is the visual authority.
+        prevButton.setBounds (772, 14, 42, 40);
+        nextButton.setBounds (1032, 14, 42, 40);
+
+        saveButton.setBounds     (1098, 21, 72, 30);
+        saveAsButton.setBounds   (1176, 21, 84, 30);
+        undoButton.setBounds     (1258, 21, 30, 30);
+        redoButton.setBounds     (1288, 21, 30, 30);
+        settingsButton.setBounds (1345, 20, 32, 32);
+        helpButton.setBounds     (1390, 20, 32, 32);
+        powerButton.setBounds    (1435, 20, 32, 32);
+    }
+
+    void paint (juce::Graphics& g) override
+    {
+        // Premium logo, exactly {19,16,320,42} on the base canvas
+        // (header-local 13,12). LOGO_USAGE_GUIDE.md.
+        const juce::Rectangle<float> logoRect (13.0f, 12.0f, 320.0f, 42.0f);
+        auto logo = Assets::logoHeader (currentScale);
+        if (logo.isValid())
+        {
+            g.setImageResamplingQuality (juce::Graphics::highResamplingQuality);
+            g.drawImage (logo, logoRect, juce::RectanglePlacement::stretchToFit);
+        }
+
+        // Preset box (the prev/next buttons are children).
+        const juce::Rectangle<float> box (812.0f, 14.0f, 222.0f, 40.0f);
+        g.setColour (tokens::bg1);
+        g.fillRoundedRectangle (box, 6.0f);
+        g.setColour (tokens::stroke);
+        g.drawRoundedRectangle (box.reduced (0.5f), 6.0f, 1.0f);
+        g.setColour (tokens::white);
+        g.setFont (Fonts::bodyValue().withHeight (15.0f));
+        g.drawText (processor.getPresetName(), box.toNearestInt(), juce::Justification::centred);
+
+        // SAVE / SAVE AS get text beside their icons.
+        drawIconLabel (g, saveButton,   "SAVE");
+        drawIconLabel (g, saveAsButton, "SAVE AS");
+
+        // Power ring: lit cyan while the plugin is active.
+        const bool bypassed = processor.getAPVTS().getRawParameterValue (pid::bypass)->load() > 0.5f;
+        if (! bypassed)
+        {
+            auto r = powerButton.getBounds().toFloat().expanded (2.0f);
+            g.setColour (tokens::cyan.withAlpha (0.18f));
+            g.fillEllipse (r);
+        }
+    }
+
+    void setCurrentScale (float s)  { currentScale = s; }
+
+private:
+    void drawIconLabel (juce::Graphics& g, const IconButton& b, const juce::String& text)
+    {
+        g.setColour (tokens::text);
+        g.setFont (Fonts::make (12.0f, false, true).withExtraKerningFactor (0.05f));
+        auto r = b.getBounds();
+        g.drawText (text, r.getX() + 26, r.getY(), r.getWidth() - 26, r.getHeight(),
+                    juce::Justification::centredLeft);
+    }
+
+    void showSettingsMenu()
+    {
+        juce::PopupMenu m;
+        m.setLookAndFeel (&getLookAndFeel());
+        m.addSectionHeader ("UI Scale");
+        const int scales[] = { 70, 80, 90, 100, 110, 125, 150 };
+        for (int s : scales)
+            m.addItem (s, juce::String (s) + " %", true,
+                       std::abs (currentScale - (float) s / 100.0f) < 0.02f);
+
+        m.showMenuAsync (juce::PopupMenu::Options()
+                            .withTargetComponent (&settingsButton),
+                         [safe = juce::Component::SafePointer<HeaderComponent> (this)] (int r)
+                         {
+                             if (safe != nullptr && r > 0)
+                                 safe->onScalePreset ((float) r / 100.0f);
+                         });
+    }
+
+    void showAbout()
+    {
+        juce::PopupMenu m;
+        m.setLookAndFeel (&getLookAndFeel());
+        m.addSectionHeader (juce::String ("SourceGlo Pro ") + JucePlugin_VersionString);
+        m.addItem (1, "Production Intelligence for Better Mixes", false);
+        m.addItem (2, "Diamond Loopz", false);
+        m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&helpButton));
+    }
+
+    SourceGloProcessor& processor;
+
+    IconButton prevButton   { "Previous preset", "chevron_left" };
+    IconButton nextButton   { "Next preset", "chevron_right" };
+    IconButton saveButton   { "Save", "save" };
+    IconButton saveAsButton { "Save As", "save_as" };
+    IconButton undoButton   { "Undo", "undo" };
+    IconButton redoButton   { "Redo", "redo" };
+    IconButton settingsButton { "Settings", "settings" };
+    IconButton helpButton   { "Help", "help" };
+    IconButton powerButton  { "Power", "power", tokens::cyan, tokens::cyan };
+
+    float currentScale = 1.0f;
+};
+
+} // namespace sourceglo

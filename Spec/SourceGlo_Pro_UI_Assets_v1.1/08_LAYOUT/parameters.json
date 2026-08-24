@@ -1,0 +1,154 @@
+[
+  {
+    "id": "sourceType",
+    "name": "Source Type",
+    "type": "choice",
+    "default": "Auto",
+    "choices": [
+      "Auto",
+      "Kick",
+      "Snare",
+      "Clap",
+      "808",
+      "Bass",
+      "Hat",
+      "Percussion",
+      "Loop",
+      "Melody",
+      "Vocal",
+      "Other"
+    ]
+  },
+  {
+    "id": "inputGain",
+    "name": "Input Gain",
+    "type": "float",
+    "min": -24.0,
+    "max": 24.0,
+    "default": 0.0,
+    "unit": "dB"
+  },
+  {
+    "id": "outputGain",
+    "name": "Output Gain",
+    "type": "float",
+    "min": -24.0,
+    "max": 12.0,
+    "default": 0.0,
+    "unit": "dB"
+  },
+  {
+    "id": "phaseInvert",
+    "name": "Phase Invert",
+    "type": "bool",
+    "default": false
+  },
+  {
+    "id": "mono",
+    "name": "Mono",
+    "type": "bool",
+    "default": false
+  },
+  {
+    "id": "fixAmount",
+    "name": "Fix Amount",
+    "type": "float",
+    "min": 0.0,
+    "max": 100.0,
+    "default": 50.0,
+    "unit": "%"
+  },
+  {
+    "id": "punch",
+    "name": "Punch",
+    "type": "float",
+    "min": 0.0,
+    "max": 100.0,
+    "default": 60.0,
+    "unit": "%"
+  },
+  {
+    "id": "body",
+    "name": "Body",
+    "type": "float",
+    "min": 0.0,
+    "max": 100.0,
+    "default": 55.0,
+    "unit": "%"
+  },
+  {
+    "id": "tone",
+    "name": "Tone",
+    "type": "float",
+    "min": 0.0,
+    "max": 100.0,
+    "default": 50.0,
+    "unit": "%"
+  },
+  {
+    "id": "air",
+    "name": "Air",
+    "type": "float",
+    "min": 0.0,
+    "max": 100.0,
+    "default": 40.0,
+    "unit": "%"
+  },
+  {
+    "id": "stereo",
+    "name": "Stereo",
+    "type": "float",
+    "min": 0.0,
+    "max": 100.0,
+    "default": 20.0,
+    "unit": "%"
+  },
+  {
+    "id": "transients",
+    "name": "Transients",
+    "type": "float",
+    "min": 0.0,
+    "max": 100.0,
+    "default": 65.0,
+    "unit": "%"
+  },
+  {
+    "id": "saturate",
+    "name": "Saturate",
+    "type": "float",
+    "min": 0.0,
+    "max": 100.0,
+    "default": 35.0,
+    "unit": "%"
+  },
+  {
+    "id": "autoMatch",
+    "name": "Auto Match",
+    "type": "bool",
+    "default": true
+  },
+  {
+    "id": "hq",
+    "name": "HQ",
+    "type": "bool",
+    "default": true
+  },
+  {
+    "id": "oversampling",
+    "name": "Oversampling",
+    "type": "choice",
+    "default": "4x",
+    "choices": [
+      "Off",
+      "2x",
+      "4x",
+      "8x"
+    ]
+  },
+  {
+    "id": "bypass",
+    "name": "Bypass",
+    "type": "bool",
+    "default": false
+  }
+]

@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleExecutable</key>
+	<string>SourceGloPro</string>
+	<key>CFBundleIdentifier</key>
+	<string>com.diamondloopz.sourceglopro</string>
+	<key>CFBundleName</key>
+	<string>SourceGlo Pro</string>
+	<key>CFBundleDisplayName</key>
+	<string>SourceGlo Pro</string>
+	<key>CFBundlePackageType</key>
+	<string>BNDL</string>
+	<key>CFBundleSignature</key>
+	<string>????</string>
+	<key>CFBundleShortVersionString</key>
+	<string>0.9.0</string>
+	<key>CFBundleVersion</key>
+	<string>0.9.0</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>NSHumanReadableCopyright</key>
+	<string>Diamond Loopz</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>10.15</string>
+	<key>NSHighResolutionCapable</key>
+	<true/>
+	<key>CSResourcesFileMapped</key>
+	<true/>
+	<key>AudioComponents</key>
+	<array>
+		<dict>
+			<key>description</key>
+			<string>Production Intelligence for Better Mixes</string>
+			<key>factoryFunction</key>
+			<string>SourceGloProAUFactory</string>
+			<key>manufacturer</key>
+			<string>DmLz</string>
+			<key>name</key>
+			<string>Diamond Loopz: SourceGlo Pro</string>
+			<key>subtype</key>
+			<string>SGPr</string>
+			<key>type</key>
+			<string>aufx</string>
+			<key>version</key>
+			<integer>2304</integer>
+			<key>sandboxSafe</key>
+			<true/>
+		</dict>
+	</array>
+</dict>
+</plist>

@@ -1,0 +1,3 @@
+SourceGlo Pro UI Assets Pack v1.1
+
+These original design assets were created for Joka Beatz / Diamond Loopz for the SourceGlo Pro plugin project. They may be modified, compiled, and distributed as part of the SourceGlo Pro software and related marketing. Do not redistribute the raw asset pack as a standalone UI asset product without the owner's permission.
