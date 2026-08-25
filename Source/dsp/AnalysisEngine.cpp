@@ -150,7 +150,8 @@ AnalysisResult AnalysisEngine::analyse (const juce::AudioBuffer<float>& stereo,
         r.lowCorrelation = (lowLL > 1e-12 && lowRR > 1e-12)
                           ? (float) (lowLR / std::sqrt (lowLL * lowRR)) : 1.0f;
 
-        if (std::abs (dc / n) > 0.01)
+        r.dcOffset = std::abs (dc / n) > 0.01;
+        if (r.dcOffset)
             r.diagnostics.push_back ({ "DC Offset Detected",
                                        "The waveform is not centred.\nHigh-pass at 20 Hz to fix it.",
                                        Severity::medium, "wave" });

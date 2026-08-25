@@ -23,7 +23,10 @@ int main (int argc, char** argv)
 
     const juce::String outName = argc > 1 ? argv[1] : "SourceGlo-ui.png";
     const juce::String sizeArg = argc > 2 ? juce::String (argv[2]).toLowerCase() : "def";
-    const juce::String modeArg = argc > 3 ? juce::String (argv[3]).toLowerCase() : "";
+    juce::String modeArg = argc > 3 ? juce::String (argv[3]).toLowerCase() : "";
+    const bool wantFix = modeArg == "fix";      // signal + engage the correction
+    if (wantFix)
+        modeArg = "signal";
 
     int width = Design::width, height = Design::height;
     if (sizeArg == "min")      { width = Design::minWidth; height = Design::minHeight; }
@@ -96,6 +99,9 @@ int main (int argc, char** argv)
         // Real analysis of the captured test feed - the shot shows the
         // engine's actual verdict on it.
         processor.analyzeNow();
+
+        if (wantFix)
+            processor.requestFixSource();
     }
 
     // Let the animated displays settle (score climb, spectrum smoothing).

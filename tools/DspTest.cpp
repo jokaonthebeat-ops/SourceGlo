@@ -199,6 +199,17 @@ int main()
         p.setPlayConfigDetails (2, 2, 48000.0, 512);
         p.prepareToPlay (48000.0, 512);
 
+        // The input/output/phase/mono/bypass contract is measured with the
+        // correction chain neutral - the chain's own stages have their own
+        // section below. (The parameter defaults intentionally colour.)
+        setParam (p, pid::punch, 0.0f);
+        setParam (p, pid::body, 0.0f);
+        setParam (p, pid::tone, 50.0f);
+        setParam (p, pid::air, 0.0f);
+        setParam (p, pid::stereo, 0.0f);
+        setParam (p, pid::transients, 0.0f);
+        setParam (p, pid::saturate, 0.0f);
+
         // Unity: -20 dBFS sine in -> same RMS out (sine RMS = amp/sqrt2).
         const double unityRms = processSineRms (p, 1000.0, 0.1f);
         checkNear (juce::Decibels::gainToDecibels (unityRms),
@@ -470,6 +481,325 @@ int main()
             check (m.score >= 0 && m.score <= 100, "score in range");
             check (m.stats.durationSec > 3.0f, "duration captured");
             check (! m.diagnostics.empty(), "diagnostics produced");
+        }
+    }
+
+    // -------------------------------------------------------------- fix chain
+    std::printf ("- fix chain and macros (absolute stage targets)\n");
+    {
+        const double sr = 48000.0;
+        const int blockSize = 512;
+
+        // Measure the chain's steady-state gain for a sine at freq with the
+        // given macro settings (last half of 1.5 s, chain fed block-wise).
+        auto chainGainDb = [&] (double freq, FixChain::MacroValues m,
+                                FixChain* preloaded = nullptr) -> double
+        {
+            FixChain local;
+            FixChain& chain = preloaded != nullptr ? *preloaded : local;
+            if (preloaded == nullptr)
+                chain.prepare (sr, blockSize);
+
+            juce::AudioBuffer<float> block (2, blockSize);
+            double phase = 0.0, sumSq = 0.0;
+            int count = 0;
+            const int blocks = (int) (sr * 1.5 / blockSize);
+            for (int b = 0; b < blocks; ++b)
+            {
+                for (int i = 0; i < blockSize; ++i)
+                {
+                    const float v = 0.25f * (float) std::sin (phase);
+                    phase += 2.0 * juce::MathConstants<double>::pi * freq / sr;
+                    block.setSample (0, i, v);
+                    block.setSample (1, i, v);
+                }
+                chain.process (block, m);
+                if (b >= blocks / 2)
+                    for (int i = 0; i < blockSize; ++i)
+                    {
+                        const double v = block.getSample (0, i);
+                        sumSq += v * v; ++count;
+                    }
+            }
+            const double rms = std::sqrt (sumSq / count);
+            return juce::Decibels::gainToDecibels (rms / (0.25 / juce::MathConstants<double>::sqrt2));
+        };
+
+        FixChain::MacroValues neutral;
+        neutral.punch = neutral.body = neutral.air = neutral.stereo
+            = neutral.transients = neutral.saturate = 0.0f;
+        neutral.tone = 0.5f;
+
+        // --- neutral chain is transparent.
+        checkNear (chainGainDb (1000.0, neutral), 0.0, 0.1, "neutral chain is unity at 1 kHz");
+        checkNear (chainGainDb (100.0, neutral), 0.0, 0.1, "neutral chain is unity at 100 Hz");
+
+        // --- Body: +6 dB bell at 180 Hz, transparent far away.
+        {
+            auto m = neutral; m.body = 1.0f;
+            checkNear (chainGainDb (180.0, m), 6.0, 0.75, "Body 100 -> +6 dB at 180 Hz");
+            checkNear (chainGainDb (4000.0, m), 0.0, 0.75, "Body 100 leaves 4 kHz alone");
+        }
+
+        // --- Tone: tilt around the mids.
+        {
+            auto m = neutral; m.tone = 1.0f;
+            checkNear (chainGainDb (8000.0, m), 4.5, 1.0, "Tone 100 -> +4.5 dB up top");
+            checkNear (chainGainDb (100.0, m), -4.5, 1.0, "Tone 100 -> -4.5 dB down low");
+            m.tone = 0.0f;
+            checkNear (chainGainDb (8000.0, m), -4.5, 1.0, "Tone 0 -> -4.5 dB up top");
+        }
+
+        // --- Air: +6 dB shelf at 12 kHz.
+        {
+            auto m = neutral; m.air = 1.0f;
+            checkNear (chainGainDb (15000.0, m), 6.0, 1.0, "Air 100 -> +6 dB at 15 kHz");
+            checkNear (chainGainDb (500.0, m), 0.0, 0.75, "Air 100 leaves 500 Hz alone");
+        }
+
+        // --- Saturate: drive 0 is bit-exact dry; full drive keeps level and
+        //     generates real odd harmonics.
+        {
+            FixChain chain;
+            chain.prepare (sr, blockSize);
+            auto m = neutral; m.saturate = 0.0f;
+
+            juce::AudioBuffer<float> block (2, blockSize);
+            double phase = 0.0;
+            float worst = 0.0f;
+            for (int b = 0; b < 30; ++b)
+            {
+                juce::AudioBuffer<float> dry (2, blockSize);
+                for (int i = 0; i < blockSize; ++i)
+                {
+                    const float v = 0.5f * (float) std::sin (phase);
+                    phase += 2.0 * juce::MathConstants<double>::pi * 1000.0 / sr;
+                    block.setSample (0, i, v); block.setSample (1, i, v);
+                    dry.setSample (0, i, v);   dry.setSample (1, i, v);
+                }
+                chain.process (block, m);
+                if (b > 15)
+                    for (int i = 0; i < blockSize; ++i)
+                        worst = juce::jmax (worst, std::abs (block.getSample (0, i)
+                                                              - dry.getSample (0, i)));
+            }
+            check (worst < 1.0e-4f, "Saturate 0 nulls against dry (worst "
+                                      + juce::String (worst, 7) + ")");
+
+            auto hot = neutral; hot.saturate = 1.0f;
+            const double levelDb = chainGainDb (1000.0, hot);
+            check (std::abs (levelDb) < 2.0, "Saturate 100 holds level within 2 dB (got "
+                                               + juce::String (levelDb, 2) + ")");
+
+            // Third harmonic: FFT of the saturated sine.
+            FixChain h;
+            h.prepare (sr, 4096);
+            juce::AudioBuffer<float> big (2, 4096);
+            double p2 = 0.0;
+            for (int r = 0; r < 8; ++r)     // settle smoothing
+            {
+                for (int i = 0; i < 4096; ++i)
+                {
+                    const float v = 0.5f * (float) std::sin (p2);
+                    p2 += 2.0 * juce::MathConstants<double>::pi * 750.0 / sr;
+                    big.setSample (0, i, v); big.setSample (1, i, v);
+                }
+                h.process (big, hot);
+            }
+            juce::dsp::FFT fft (12);
+            std::vector<float> data (8192, 0.0f);
+            for (int i = 0; i < 4096; ++i)
+                data[(size_t) i] = big.getSample (0, i);
+            fft.performFrequencyOnlyForwardTransform (data.data());
+            const int fundBin = (int) std::round (750.0 * 4096 / sr);
+            const float fund = data[(size_t) fundBin];
+            const float third = data[(size_t) (fundBin * 3)];
+            const float thirdDb = juce::Decibels::gainToDecibels (third / juce::jmax (1.0e-9f, fund));
+            check (thirdDb > -40.0f, "Saturate 100 generates a 3rd harmonic above -40 dBc (got "
+                                       + juce::String (thirdDb, 1) + ")");
+        }
+
+        // --- Stereo width: side grows ~1.6x, mid untouched.
+        {
+            FixChain chain;
+            chain.prepare (sr, blockSize);
+            auto m = neutral; m.stereo = 1.0f;
+
+            juce::AudioBuffer<float> block (2, blockSize);
+            double phase = 0.0, midSq = 0.0, sideSq = 0.0, midSqIn = 0.0, sideSqIn = 0.0;
+            const int blocks = (int) (sr * 1.0 / blockSize);
+            for (int b = 0; b < blocks; ++b)
+            {
+                for (int i = 0; i < blockSize; ++i)
+                {
+                    const float v = 0.4f * (float) std::sin (phase);
+                    phase += 2.0 * juce::MathConstants<double>::pi * 500.0 / sr;
+                    block.setSample (0, i, v);
+                    block.setSample (1, i, v * 0.4f);
+                }
+                if (b >= blocks / 2)
+                    for (int i = 0; i < blockSize; ++i)
+                    {
+                        const double mi = 0.5 * (block.getSample (0, i) + block.getSample (1, i));
+                        const double si = 0.5 * (block.getSample (0, i) - block.getSample (1, i));
+                        midSqIn += mi * mi; sideSqIn += si * si;
+                    }
+                chain.process (block, m);
+                if (b >= blocks / 2)
+                    for (int i = 0; i < blockSize; ++i)
+                    {
+                        const double mi = 0.5 * (block.getSample (0, i) + block.getSample (1, i));
+                        const double si = 0.5 * (block.getSample (0, i) - block.getSample (1, i));
+                        midSq += mi * mi; sideSq += si * si;
+                    }
+            }
+            checkNear (std::sqrt (sideSq / sideSqIn), 1.6, 0.1, "Stereo 100 widens the side 1.6x");
+            checkNear (std::sqrt (midSq / midSqIn), 1.0, 0.05, "Stereo 100 leaves the mid alone");
+        }
+
+        // --- fix engagement: counter-EQ, trim, low-mono.
+        {
+            FixChain chain;
+            chain.prepare (sr, blockSize);
+
+            AnalysisResult a;
+            a.enoughAudio = true;
+            a.bandDeviationDb[3] = 8.0f;      // 6 dB of harsh excess beyond the deadzone
+            a.truePeakDb = 0.5f;              // over full scale -> trim to -1 dBTP
+            a.lowCorrelation = 1.0f;
+            chain.engageFix (a);
+            check (chain.isFixEngaged(), "fix engages");
+
+            auto m = neutral; m.fixAmount = 1.0f;
+            const double at3500 = chainGainDb (3500.0, m, &chain);
+            // -6 dB band correction - 1.5 dB trim = about -7.5 dB at band centre.
+            checkNear (at3500, -7.5, 1.2, "fix counters a +8 dB HighMid deviation at full amount");
+
+            FixChain chain50;
+            chain50.prepare (sr, blockSize);
+            chain50.engageFix (a);
+            auto mHalf = neutral; mHalf.fixAmount = 0.5f;
+            const double at3500half = chainGainDb (3500.0, mHalf, &chain50);
+            checkNear (at3500half, -3.75, 1.2, "fix amount 50% halves the correction");
+
+            chain.disengageFix();
+            check (! chain.isFixEngaged(), "fix disengages");
+        }
+
+        // --- low-mono fix kills wide sub content.
+        {
+            FixChain chain;
+            chain.prepare (sr, blockSize);
+            AnalysisResult a;
+            a.enoughAudio = true;
+            a.lowCorrelation = -0.5f;
+            chain.engageFix (a);
+
+            auto m = neutral; m.fixAmount = 1.0f;
+            juce::AudioBuffer<float> block (2, blockSize);
+            double phase = 0.0, sideSq = 0.0, sideSqIn = 0.0;
+            const int blocks = (int) (sr * 1.5 / blockSize);
+            for (int b = 0; b < blocks; ++b)
+            {
+                for (int i = 0; i < blockSize; ++i)
+                {
+                    const float v = 0.4f * (float) std::sin (phase);
+                    phase += 2.0 * juce::MathConstants<double>::pi * 45.0 / sr;
+                    block.setSample (0, i, v);
+                    block.setSample (1, i, -v);        // fully wide sub
+                }
+                if (b >= blocks / 2)
+                    for (int i = 0; i < blockSize; ++i)
+                    {
+                        const double si = 0.5 * (block.getSample (0, i) - block.getSample (1, i));
+                        sideSqIn += si * si;
+                    }
+                chain.process (block, m);
+                if (b >= blocks / 2)
+                    for (int i = 0; i < blockSize; ++i)
+                    {
+                        const double si = 0.5 * (block.getSample (0, i) - block.getSample (1, i));
+                        sideSq += si * si;
+                    }
+            }
+            const double reductionDb = 10.0 * std::log10 (sideSq / juce::jmax (1.0e-12, sideSqIn));
+            check (reductionDb < -12.0, "low-mono fix cuts 45 Hz side by > 12 dB (got "
+                                          + juce::String (reductionDb, 1) + ")");
+        }
+
+        // --- transient shaping: attack of a burst gains more than its tail.
+        {
+            FixChain chain;
+            chain.prepare (sr, blockSize);
+            auto m = neutral; m.transients = 1.0f;
+
+            const int n = (int) (sr * 2.0);
+            juce::AudioBuffer<float> in (2, n), out (2, n);
+            double phase = 0.0;
+            for (int i = 0; i < n; ++i)
+            {
+                const double t = std::fmod (i / sr, 0.5);
+                const float env = t < 0.25f ? 1.0f : 0.0f;   // 250 ms bursts
+                const float v = 0.35f * env * (float) std::sin (phase);
+                phase += 2.0 * juce::MathConstants<double>::pi * 400.0 / sr;
+                in.setSample (0, i, v);
+                in.setSample (1, i, v);
+            }
+            juce::AudioBuffer<float> block (2, blockSize);
+            for (int start = 0; start + blockSize <= n; start += blockSize)
+            {
+                for (int ch = 0; ch < 2; ++ch)
+                    block.copyFrom (ch, 0, in, ch, start, blockSize);
+                chain.process (block, m);
+                for (int ch = 0; ch < 2; ++ch)
+                    out.copyFrom (ch, start, block, ch, 0, blockSize);
+            }
+
+            // Compare gain over the first 10 ms of the last burst vs its tail.
+            const int burstStart = (int) (sr * 1.5);
+            auto rmsOf = [] (const juce::AudioBuffer<float>& b, int from, int len)
+            {
+                double sum = 0.0;
+                for (int i = from; i < from + len; ++i)
+                    sum += (double) b.getSample (0, i) * b.getSample (0, i);
+                return std::sqrt (sum / len);
+            };
+            const int ms10 = (int) (sr * 0.010), ms100 = (int) (sr * 0.100);
+            const double attackGain = rmsOf (out, burstStart, ms10) / rmsOf (in, burstStart, ms10);
+            const double tailGain = rmsOf (out, burstStart + ms100, ms100)
+                                      / rmsOf (in, burstStart + ms100, ms100);
+            check (attackGain > tailGain * 1.25,
+                   "Transients 100 lifts the attack over the tail ("
+                     + juce::String (attackGain, 2) + " vs " + juce::String (tailGain, 2) + ")");
+            check (tailGain < 1.15, "Transients 100 leaves the tail nearly alone (got "
+                                      + juce::String (tailGain, 2) + ")");
+        }
+
+        // --- A/B compare returns the raw side.
+        {
+            FixChain chain;
+            chain.prepare (sr, blockSize);
+            auto m = neutral; m.body = 1.0f; m.saturate = 1.0f; m.compare = true;
+            const double gain = chainGainDb (180.0, m, &chain);
+            checkNear (gain, 0.0, 0.15, "A/B raw side bypasses the chain");
+        }
+
+        // --- reported oversampling latency tracks the parameter.
+        {
+            SourceGloProcessor p;
+            p.setPlayConfigDetails (2, 2, 48000.0, 512);
+            p.prepareToPlay (48000.0, 512);
+            juce::AudioBuffer<float> block (2, 512);
+            juce::MidiBuffer midi;
+
+            setParam (p, pid::oversampling, 0.0f);   // Off
+            block.clear(); p.processBlock (block, midi);
+            check (p.getLatencySamples() == 0, "latency 0 with oversampling off");
+
+            setParam (p, pid::oversampling, 3.0f);   // 8x
+            block.clear(); p.processBlock (block, midi);
+            check (p.getLatencySamples() > 0, "8x oversampling reports latency (got "
+                                                + juce::String (p.getLatencySamples()) + ")");
         }
     }
 

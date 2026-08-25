@@ -38,6 +38,7 @@ public:
         addAndMakeVisible (postButton);
 
         fftData.resize (SourceGloProcessor::fftSize * 2, 0.0f);
+        pulled.resize (SourceGloProcessor::fftSize, 0.0f);
         window.resize (SourceGloProcessor::fftSize);
         juce::dsp::WindowingFunction<float>::fillWindowingTables (
             window.data(), (size_t) SourceGloProcessor::fftSize,
@@ -223,9 +224,22 @@ private:
         if (! isShowing() && ! headlessRefreshMode())
             return;
 
+        // Drain both taps every tick (so neither backlogs); display the one
+        // the Pre/Post selector asks for.
+        const bool post = postButton.getToggleState();
         bool gotAudio = false;
-        while (processor.pullFFTBlock (fftData.data()))
-            gotAudio = true;
+        while (processor.pullFFTBlock (pulled.data()))
+            if (! post)
+            {
+                std::copy (pulled.begin(), pulled.end(), fftData.begin());
+                gotAudio = true;
+            }
+        while (processor.pullPostFFTBlock (pulled.data()))
+            if (post)
+            {
+                std::copy (pulled.begin(), pulled.end(), fftData.begin());
+                gotAudio = true;
+            }
 
         if (gotAudio)
         {
@@ -270,7 +284,7 @@ private:
 
     SourceGloProcessor& processor;
     juce::dsp::FFT fft;
-    std::vector<float> fftData, window;
+    std::vector<float> fftData, window, pulled;
     std::array<float, numBins> displayDb, smoothedDb;
     juce::uint32 lastAudioTime = 0;
 

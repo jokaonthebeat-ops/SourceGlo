@@ -67,6 +67,7 @@ SourceGloProcessor::SourceGloProcessor()
       apvts (*this, nullptr, "SourceGloPro", createLayout())
 {
     fftBuffer.resize ((size_t) fftFifo.getTotalSize());
+    postBuffer.resize ((size_t) postFifo.getTotalSize());
 }
 
 SourceGloProcessor::~SourceGloProcessor()
@@ -85,7 +86,7 @@ bool SourceGloProcessor::isBusesLayoutSupported (const BusesLayout& layouts) con
     return in == juce::AudioChannelSet::mono() || in == juce::AudioChannelSet::stereo();
 }
 
-void SourceGloProcessor::prepareToPlay (double sampleRate, int)
+void SourceGloProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 {
     currentSampleRate.store (sampleRate);
     inGainSm.reset (sampleRate, 0.02);
@@ -93,8 +94,12 @@ void SourceGloProcessor::prepareToPlay (double sampleRate, int)
     bypassMix.reset (sampleRate, 0.05);        // click-free power button
 
     fftFifo.reset();
+    postFifo.reset();
     capture.prepare (sampleRate);
     liveTruePeak.reset();
+
+    fixChain.prepare (sampleRate, samplesPerBlock);
+    reportedLatency = -1;   // re-report on the first block
 }
 
 void SourceGloProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer&)
@@ -171,7 +176,49 @@ void SourceGloProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::M
         fftFifo.finishedWrite (size1 + size2);
     }
 
-    // (Correction/macro DSP lands after the visual milestone.)
+    // --- correction + macro chain ------------------------------------------
+    {
+        FixChain::MacroValues macros;
+        auto pct = [this] (const char* id) {
+            return apvts.getRawParameterValue (id)->load() * 0.01f; };
+        macros.punch      = pct (pid::punch);
+        macros.body       = pct (pid::body);
+        macros.tone       = pct (pid::tone);
+        macros.air        = pct (pid::air);
+        macros.stereo     = pct (pid::stereo);
+        macros.transients = pct (pid::transients);
+        macros.saturate   = pct (pid::saturate);
+        macros.fixAmount  = pct (pid::fixAmount);
+        macros.oversampling = (int) apvts.getRawParameterValue (pid::oversampling)->load();
+        macros.hq         = apvts.getRawParameterValue (pid::hq)->load() > 0.5f;
+        macros.compare    = compareRaw.load();
+
+        fixChain.process (buffer, macros);
+
+        // Report oversampling latency when the setting changes. Doing it here
+        // keeps it in lockstep with the block that actually changed.
+        const int latency = fixChain.getLatencySamples (macros.oversampling, macros.hq);
+        if (latency != reportedLatency)
+        {
+            reportedLatency = latency;
+            setLatencySamples (latency);
+        }
+    }
+
+    // Post-chain spectrum feed (the display's "Post" view).
+    {
+        int start1, size1, start2, size2;
+        postFifo.prepareToWrite (numSamples, start1, size1, start2, size2);
+        const float* l = buffer.getReadPointer (0);
+        const float* r = numCh > 1 ? buffer.getReadPointer (1) : l;
+
+        for (int i = 0; i < size1; ++i)
+            postBuffer[(size_t) (start1 + i)] = 0.5f * (l[i] + r[i]);
+        for (int i = 0; i < size2; ++i)
+            postBuffer[(size_t) (start2 + i)] = 0.5f * (l[size1 + i] + r[size1 + i]);
+
+        postFifo.finishedWrite (size1 + size2);
+    }
 
     for (int i = 0; i < numSamples; ++i)
     {
@@ -202,6 +249,20 @@ bool SourceGloProcessor::pullFFTBlock (float* dest)
     if (size2 > 0)
         std::memcpy (dest + size1, fftBuffer.data() + start2, sizeof (float) * (size_t) size2);
     fftFifo.finishedRead (size1 + size2);
+    return true;
+}
+
+bool SourceGloProcessor::pullPostFFTBlock (float* dest)
+{
+    if (postFifo.getNumReady() < fftSize)
+        return false;
+
+    int start1, size1, start2, size2;
+    postFifo.prepareToRead (fftSize, start1, size1, start2, size2);
+    std::memcpy (dest, postBuffer.data() + start1, sizeof (float) * (size_t) size1);
+    if (size2 > 0)
+        std::memcpy (dest + size1, postBuffer.data() + start2, sizeof (float) * (size_t) size2);
+    postFifo.finishedRead (size1 + size2);
     return true;
 }
 
@@ -239,6 +300,7 @@ void SourceGloProcessor::publishResult (const AnalysisResult& result)
     }
 
     analysis.diagnostics = result.diagnostics;
+    lastAnalysis = result;
     analyzing.store (false);
     analysisChanged.sendChangeMessage();
 }
@@ -279,10 +341,17 @@ void SourceGloProcessor::analyzeNow()
 
 void SourceGloProcessor::requestFixSource()
 {
-    // Real fix engine lands with the next milestone; refresh the analysis so
-    // the button at least does something honest.
-    if (analysis.analyzed)
-        requestAnalyze();
+    // Toggle: engage the correction computed from the last analysis, or
+    // release it. Does nothing until something has been analysed.
+    if (! analysis.analyzed)
+        return;
+
+    if (fixChain.isFixEngaged())
+        fixChain.disengageFix();
+    else
+        fixChain.engageFix (lastAnalysis);
+
+    analysisChanged.sendChangeMessage();
 }
 
 float SourceGloProcessor::truePeakSinceDb()
@@ -320,6 +389,16 @@ void SourceGloProcessor::getStateInformation (juce::MemoryBlock& destData)
     state.setProperty ("presetIndex", presetIndex, nullptr);
     state.setProperty ("uiScale", uiScale.load(), nullptr);
 
+    const auto fix = fixChain.getFixState();
+    juce::String bands;
+    for (int b = 0; b < FixChain::numFixBands; ++b)
+        bands << juce::String (fix.bandGainDb[b], 3) << (b < FixChain::numFixBands - 1 ? ";" : "");
+    state.setProperty ("fixEngaged", fixChain.isFixEngaged(), nullptr);
+    state.setProperty ("fixBands", bands, nullptr);
+    state.setProperty ("fixTrim", fix.trimDb, nullptr);
+    state.setProperty ("fixLowMono", fix.lowMono, nullptr);
+    state.setProperty ("fixDc", fix.dcFilter, nullptr);
+
     if (auto xml = state.createXml())
         copyXmlToBinary (*xml, destData);
 }
@@ -333,6 +412,17 @@ void SourceGloProcessor::setStateInformation (const void* data, int sizeInBytes)
             auto state = juce::ValueTree::fromXml (*xml);
             presetIndex = (int) state.getProperty ("presetIndex", 0);
             uiScale.store ((float) (double) state.getProperty ("uiScale", 1.0));
+
+            FixChain::FixState fix;
+            auto bands = juce::StringArray::fromTokens (
+                state.getProperty ("fixBands", "").toString(), ";", "");
+            for (int b = 0; b < FixChain::numFixBands && b < bands.size(); ++b)
+                fix.bandGainDb[b] = bands[b].getFloatValue();
+            fix.trimDb   = (float) (double) state.getProperty ("fixTrim", 0.0);
+            fix.lowMono  = (bool) state.getProperty ("fixLowMono", false);
+            fix.dcFilter = (bool) state.getProperty ("fixDc", false);
+            fixChain.setFixState (fix, (bool) state.getProperty ("fixEngaged", false));
+
             apvts.replaceState (state);
         }
     }

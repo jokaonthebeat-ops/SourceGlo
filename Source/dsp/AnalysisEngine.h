@@ -33,6 +33,7 @@ struct AnalysisResult
 
     // Stereo.
     float correlation = 1.0f, lowCorrelation = 1.0f;
+    bool dcOffset = false;
 
     // Scores 0..100.
     int score = 0, tone = 0, punch = 0, level = 0, phase = 0, fit = 0;

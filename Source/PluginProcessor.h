@@ -14,6 +14,7 @@
 #include "AnalysisModel.h"
 #include "dsp/CaptureRing.h"
 #include "dsp/TruePeakMeter.h"
+#include "dsp/FixChain.h"
 #include "dsp/AnalysisEngine.h"
 
 namespace sourceglo
@@ -108,11 +109,18 @@ public:
     std::atomic<float> outPeak[2] { { 0.0f }, { 0.0f } };
     std::atomic<float> outRms[2]  { { 0.0f }, { 0.0f } };
 
-    // Mono FFT feed: audio thread writes, UI thread reads. Lock-free.
+    // Mono FFT feeds: audio thread writes, UI thread reads. Lock-free.
+    // Pre = the source after the input section; Post = what leaves the chain.
     static constexpr int fftOrder = 11;                    // 2048
     static constexpr int fftSize  = 1 << fftOrder;
-    bool pullFFTBlock (float* dest);                       // fftSize samples; false if starved
+    bool pullFFTBlock (float* dest);                       // pre;  false if starved
+    bool pullPostFFTBlock (float* dest);                   // post; false if starved
     double getSampleRateHz() const                         { return currentSampleRate.load(); }
+
+    // --- fix + compare ----------------------------------------------------
+    bool isFixEngaged() const                              { return fixChain.isFixEngaged(); }
+    void setCompareRaw (bool raw)                          { compareRaw.store (raw); }
+    bool isComparingRaw() const                            { return compareRaw.load(); }
 
 private:
     static juce::AudioProcessorValueTreeState::ParameterLayout createLayout();
@@ -131,6 +139,14 @@ private:
     CaptureRing capture;
     TruePeakMeter liveTruePeak;
     std::atomic<float> truePeakLinear { 0.0f };
+
+    FixChain fixChain;
+    AnalysisResult lastAnalysis;               // message thread only
+    std::atomic<bool> compareRaw { false };    // A/B: true = hear the raw side
+    int reportedLatency = -1;
+
+    juce::AbstractFifo postFifo { fftSize * 4 };
+    std::vector<float> postBuffer;
 
     juce::ThreadPool analysisPool { 1 };
 

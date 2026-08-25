@@ -38,10 +38,10 @@ public:
     {
         // sourceglo::ButtonState, not the juce::Button member type of the
         // same name that unqualified lookup finds first in a Button subclass.
-        const auto state = ! isEnabled() ? sourceglo::ButtonState::disabled
-                         : down          ? sourceglo::ButtonState::down
-                         : over          ? sourceglo::ButtonState::hover
-                                         : sourceglo::ButtonState::normal;
+        const auto state = ! isEnabled()               ? sourceglo::ButtonState::disabled
+                         : (down || getToggleState()) ? sourceglo::ButtonState::down
+                         : over                       ? sourceglo::ButtonState::hover
+                                                      : sourceglo::ButtonState::normal;
 
         auto art = Assets::button (kind, state);
         const auto r = getLocalBounds().toFloat();

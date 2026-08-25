@@ -24,8 +24,9 @@ public:
         setTitle ("Source score");
 
         analyzeButton.setTooltip ("Analyze the current source");
-        fixButton.setTooltip ("Apply intelligent source correction");
-        abButton.setTooltip ("Compare original and fixed source");
+        fixButton.setTooltip ("Apply intelligent source correction (analyze first)");
+        abButton.setTooltip ("Compare against the unprocessed source");
+        fixButton.setEnabled (false);   // until something has been analysed
 
         abButton.setClickingTogglesState (true);
         analyzeButton.setLabelColour (tokens::buttonLbl);
@@ -38,6 +39,7 @@ public:
 
         analyzeButton.onClick = [this] { processor.requestAnalyze(); };
         fixButton.onClick     = [this] { processor.requestFixSource(); };
+        abButton.onClick      = [this] { processor.setCompareRaw (abButton.getToggleState()); };
 
         processor.analysisChanged.addChangeListener (this);
         startTimerHz (30);
@@ -204,6 +206,9 @@ private:
 
     void changeListenerCallback (juce::ChangeBroadcaster*) override
     {
+        const auto& model = processor.getAnalysis();
+        fixButton.setEnabled (model.analyzed);
+        fixButton.setToggleState (processor.isFixEngaged(), juce::dontSendNotification);
         repaint();
     }
 
