@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    SourceGlo Pro installer.
+
+    Three separately selectable components so a customer can install only the
+    formats their DAW uses. VST3 and AU go to the system-wide plug-in folders,
+    which is what a paid product should do - a per-user install is invisible to
+    a DAW running as another user and confuses support.
+-->
+<installer-gui-script minSpecVersion="2">
+
+    <title>SourceGlo Pro</title>
+    <organization>com.diamondloopz</organization>
+
+    <!-- arm64 needs Big Sur; the binaries are built with MIN_MACOS=11.0. -->
+    <options customize="always" require-scripts="false" rootVolumeOnly="true" hostArchitectures="x86_64,arm64"/>
+    <volume-check>
+        <allowed-os-versions>
+            <os-version min="11.0"/>
+        </allowed-os-versions>
+    </volume-check>
+
+    <welcome    file="welcome.html"    mime-type="text/html"/>
+    <license    file="license.html"    mime-type="text/html"/>
+    <conclusion file="conclusion.html" mime-type="text/html"/>
+
+    <choices-outline>
+        <line choice="choice.vst3"/>
+        <line choice="choice.au"/>
+        <line choice="choice.standalone"/>
+    </choices-outline>
+
+    <choice id="choice.vst3" title="VST3 Plug-in"
+            description="Installs SourceGlo Pro.vst3 to /Library/Audio/Plug-Ins/VST3. For Ableton Live, FL Studio, Studio One, REAPER, Cubase and most other hosts.">
+        <pkg-ref id="com.diamondloopz.sourceglopro.vst3"/>
+    </choice>
+
+    <choice id="choice.au" title="Audio Unit"
+            description="Installs SourceGlo Pro.component to /Library/Audio/Plug-Ins/Components. Required for Logic Pro and GarageBand.">
+        <pkg-ref id="com.diamondloopz.sourceglopro.au"/>
+    </choice>
+
+    <choice id="choice.standalone" title="Standalone Application"
+            description="Installs SourceGlo Pro.app to /Applications. Runs without a DAW, using your audio interface directly.">
+        <pkg-ref id="com.diamondloopz.sourceglopro.app"/>
+    </choice>
+
+    <pkg-ref id="com.diamondloopz.sourceglopro.vst3" version="0.9.0" onConclusion="none">SourceGloPro-VST3.pkg</pkg-ref>
+    <pkg-ref id="com.diamondloopz.sourceglopro.au"   version="0.9.0" onConclusion="none">SourceGloPro-AU.pkg</pkg-ref>
+    <pkg-ref id="com.diamondloopz.sourceglopro.app"  version="0.9.0" onConclusion="none">SourceGloPro-App.pkg</pkg-ref>
+
+</installer-gui-script>
