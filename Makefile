@@ -24,7 +24,7 @@
 # =============================================================================
 
 PROJECT      := SourceGloPro
-VERSION      := 0.9.5
+VERSION      := 1.0.0
 JUCE_DIR     := /Users/jokabeatz/Documents/JUCE
 JUCE_MODULES := $(JUCE_DIR)/modules
 VST3_SDK     := $(JUCE_MODULES)/juce_audio_processors_headless/format_types/VST3_SDK
@@ -216,7 +216,7 @@ CONFIG_STAMP := $(DIST)/.config-$(CONFIG_TAG)
 #  Build rules
 # -----------------------------------------------------------------------------
 
-.PHONY: all vst3 au standalone install universal clean distclean \
+.PHONY: all vst3 au standalone install universal clean distclean release \
         juceobjs syntax uishot dsptest test sanitize installer notarize icon video reel assets
 
 all: vst3 au standalone
@@ -607,6 +607,32 @@ installer:
 	@echo "  Store credentials once, then run 'make notarize':"
 	@echo "    xcrun notarytool store-credentials SourceGlo --apple-id YOU@EXAMPLE.COM \\"
 	@echo "      --team-id 922D43C6FJ --password APP-SPECIFIC-PASSWORD"
+
+# -----------------------------------------------------------------------------
+#  Retail zip: installer + Read Me First + License. Refuses an unstapled pkg -
+#  every customer would hit a Gatekeeper wall. Order:
+#  make installer -> make notarize -> make release.
+# -----------------------------------------------------------------------------
+release:
+	@test -f "$(INSTALLER)" || { echo "  no installer - run 'make installer' first"; exit 1; }
+	@xcrun stapler validate "$(INSTALLER)" >/dev/null 2>&1 || { \
+	  echo "  The installer is not stapled; customers would see a Gatekeeper"; \
+	  echo "  warning. Store credentials once, then notarise:"; \
+	  echo "    xcrun notarytool store-credentials SourceGlo --apple-id YOU \\"; \
+	  echo "      --team-id 922D43C6FJ --password APP-SPECIFIC-PASSWORD"; \
+	  echo "    make notarize && make release"; \
+	  exit 1; }
+	@echo "  installer is notarised and stapled"
+	@rm -rf "$(BUILD)/releasezip" && mkdir -p "$(BUILD)/releasezip/SourceGlo Pro $(VERSION)"
+	@cp "$(INSTALLER)" "$(BUILD)/releasezip/SourceGlo Pro $(VERSION)/Install SourceGlo Pro.pkg"
+	@cp $(ROOT)/packaging/release/ReadMeFirst.txt \
+	    "$(BUILD)/releasezip/SourceGlo Pro $(VERSION)/Read Me First.txt"
+	@cp $(ROOT)/packaging/release/License.txt \
+	    "$(BUILD)/releasezip/SourceGlo Pro $(VERSION)/License.txt"
+	@rm -f "$(BUILD)/SourceGloPro-$(VERSION)-macOS.zip"
+	@cd "$(BUILD)/releasezip" && zip -rXq "$(BUILD)/SourceGloPro-$(VERSION)-macOS.zip" \
+	    "SourceGlo Pro $(VERSION)"
+	@echo "  $(BUILD)/SourceGloPro-$(VERSION)-macOS.zip ($$(du -h "$(BUILD)/SourceGloPro-$(VERSION)-macOS.zip" | cut -f1))"
 
 notarize: $(INSTALLER)
 	@echo "Submitting to Apple. This usually takes a few minutes."

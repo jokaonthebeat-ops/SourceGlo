@@ -1,0 +1,32 @@
+=== SHORT (one line, <=140 chars) ===
+SourceGlo Pro scores your source 0-100, names what's wrong, fixes it - and
+when it can't be saved, finds a better sample in YOUR library.
+
+=== MEDIUM (store card, ~60 words) ===
+Production intelligence for better mixes. SourceGlo Pro analyzes your kick,
+808, snare or vocal, scores it against a modern pro standard, and shows
+exactly what's wrong - masking, headroom, weak body, phase. One gold button
+fixes it. Eight macros finish it. And the rescue engine ranks your own
+sample library for a better candidate, draggable straight into your project.
+VST3/AU/Standalone, macOS universal.
+
+=== LONG (product page) ===
+Use marketing/SALES-PAGE.md.
+
+=== FEATURE BULLETS ===
+- Source Score 0-100 with Tone / Punch / Level / Phase / Fit pods
+- Plain-language diagnostics with exact frequency ranges
+- Tempo + key detection (bass-weighted chroma - it knows 808 culture)
+- FIX SOURCE: analysis-derived counter-EQ, headroom trim, low-end mono repair
+- Fix Amount scaling and click-free A/B against the raw source
+- 8 macros: Punch, Body, Tone, Air, Stereo, Transients, Saturate, Output
+- Oversampled saturation (2x/4x/8x) with correct host latency reporting
+- Rescue engine: ranks YOUR sample library, previews in place, drags into
+  your DAW
+- 29 factory presets by source type + your own, with modified indicator
+- BS.1770-style true-peak metering
+- VST3 + AU + Standalone, macOS 11+ universal; resizable 70-150%
+
+=== REQUIREMENTS ===
+macOS 11 Big Sur or later, Intel or Apple Silicon.
+VST3 host, AU host (Logic/GarageBand), or standalone.

@@ -1,0 +1,39 @@
+SOURCEGLO PRO 1.0.0
+Copyright (c) Diamond Loopz. All rights reserved.
+
+
+LICENCE
+
+You are granted a non-exclusive licence to install and use SourceGlo Pro on
+computers you own or control. You may not redistribute, resell, rent, sub-licence
+or publish the software, and you may not reverse engineer, decompile or
+disassemble it except to the extent that applicable law expressly permits it.
+
+Audio you produce using SourceGlo Pro is entirely yours. There is no royalty and
+no attribution requirement on your music.
+
+
+THIRD PARTY
+
+Built with the JUCE framework (https://juce.com). JUCE is licensed separately by
+Raw Material Software Limited.
+
+VST is a trademark of Steinberg Media Technologies GmbH, registered in Europe
+and other countries. Audio Unit, Logic Pro, GarageBand and macOS are trademarks
+of Apple Inc.
+
+True-peak measurement follows ITU-R BS.1770. That is a published
+specification; this is an independent implementation and carries no
+certification from the ITU.
+
+
+NO WARRANTY
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL DIAMOND LOOPZ BE
+LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF
+CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
+SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+Always keep a backup of your work.

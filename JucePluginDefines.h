@@ -32,9 +32,9 @@
 #define JucePlugin_IsMidiEffect             0
 #define JucePlugin_EditorRequiresKeyboardFocus 0
 
-#define JucePlugin_Version                  0.9.5
-#define JucePlugin_VersionString            "0.9.5"
-#define JucePlugin_VersionCode              0x00905
+#define JucePlugin_Version                  1.0.0
+#define JucePlugin_VersionString            "1.0.0"
+#define JucePlugin_VersionCode              0x10000
 
 #define JucePlugin_VSTUniqueID              JucePlugin_PluginCode
 #define JucePlugin_VSTCategory              kPlugCategAnalysis
