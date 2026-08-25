@@ -405,13 +405,27 @@ AnalysisResult AnalysisEngine::analyse (const juce::AudioBuffer<float>& stereo,
         return juce::jlimit (0.0f, 100.0f, 100.0f - dist * slope);
     };
 
-    // Tone: distance from the source-type band profile.
+    // Tone: distance from the source-type band profile - asymmetric, like
+    // the rescue matcher. In the profile's prominent bands (target >= -6 dB)
+    // missing and excess energy both hurt; in its background bands only
+    // EXCESS hurts. A kick with silent highs is not "bad tone", and a
+    // symmetric mean over -60 dB empty bands pinned every sparse source's
+    // Tone pod to 0 - where no +/-8 dB correction could ever move it,
+    // because you cannot EQ-boost energy that does not exist.
     {
-        float meanDev = 0.0f;
+        float weightedPenalty = 0.0f, weightSum = 0.0f;
         for (int b = 0; b < kNumBands; ++b)
-            meanDev += std::abs (r.bandDeviationDb[b]);
-        meanDev /= (float) kNumBands;
-        r.tone = (int) juce::jlimit (0.0f, 100.0f, 100.0f - meanDev * 6.0f);
+        {
+            const bool prominent = profile.target[b] >= -6.0f;
+            const float dev = r.bandDeviationDb[b];
+            const float penalty = juce::jmin (20.0f,
+                prominent ? std::abs (dev) : juce::jmax (0.0f, dev));
+            const float weight = prominent ? 1.0f : 0.7f;
+            weightedPenalty += penalty * weight;
+            weightSum += weight;
+        }
+        r.tone = (int) juce::jlimit (0.0f, 100.0f,
+                     100.0f - (weightedPenalty / weightSum) * 6.0f);
     }
 
     // Level: sample peak in window, true peak under the ceiling, not too quiet.
@@ -465,14 +479,25 @@ AnalysisResult AnalysisEngine::analyse (const juce::AudioBuffer<float>& stereo,
     {
         std::vector<Diagnostic> highs, mediums, goods;
 
-        // Clipping: runs of samples pinned at the rail.
+        // Clipping: FLAT-TOPPED runs at the rail - consecutive samples that
+        // are both loud and nearly identical. Loudness alone is not enough:
+        // float audio over 0 dBFS is legal headroom and stays smoothly
+        // curved, and flagging it as "digital clipping" (as this used to)
+        // cries wolf on every hot-but-clean source. That case is Headroom
+        // Too Hot, which the true-peak rule below already raises.
         {
             int clipped = 0, run = 0;
+            float prevL = 0.0f, prevR = 0.0f;
             for (int i = 0; i < n; ++i)
             {
-                const bool pinned = std::abs (L[i]) >= 0.9995f || std::abs (R[i]) >= 0.9995f;
+                const bool pinned = (std::abs (L[i]) >= 0.999f
+                                       && std::abs (L[i] - prevL) < 1.5e-4f)
+                                 || (std::abs (R[i]) >= 0.999f
+                                       && std::abs (R[i] - prevR) < 1.5e-4f);
+                prevL = L[i];
+                prevR = R[i];
                 run = pinned ? run + 1 : 0;
-                if (run >= 3) ++clipped;
+                if (run >= 5) ++clipped;
             }
             if (clipped > n / 100000 + 2)
                 highs.push_back ({ "Digital Clipping Detected",

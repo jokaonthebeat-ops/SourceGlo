@@ -390,6 +390,18 @@ int main()
             for (const auto& d : rq.diagnostics)
                 if (d.title == "Clipping Clean") foundClean = true;
             check (foundClean, "clean signal reports Clipping Clean");
+
+            // Float audio over 0 dBFS is loud, not flat-topped: it must raise
+            // Headroom Too Hot, never Digital Clipping.
+            const auto hot = AnalysisEngine::analyse (makeSine (60.0, 1.3f, 2.0), sr, 1);
+            bool hotClip = false, hotHeadroom = false;
+            for (const auto& d : hot.diagnostics)
+            {
+                if (d.title == "Digital Clipping Detected") hotClip = true;
+                if (d.title == "Headroom Too Hot") hotHeadroom = true;
+            }
+            check (! hotClip, "loud smooth float is not called digital clipping");
+            check (hotHeadroom, "loud smooth float raises Headroom Too Hot");
         }
 
         // --- phase: dual mono vs polarity-flipped right channel.
@@ -701,10 +713,116 @@ int main()
             chain50.engageFix (a);
             auto mHalf = neutral; mHalf.fixAmount = 0.5f;
             const double at3500half = chainGainDb (3500.0, mHalf, &chain50);
-            checkNear (at3500half, -4.75, 1.3, "fix amount 50% halves the correction");
+            // Half the band correction plus the FULL -1.5 dB safety trim.
+            checkNear (at3500half, -5.5, 1.3, "fix amount 50% halves the EQ, keeps the trim");
 
             chain.disengageFix();
             check (! chain.isFixEngaged(), "fix disengages");
+        }
+
+        // --- the reward loop: analysis measures the PROCESSED source, so
+        //     engaging the fix visibly improves the pods it targets.
+        {
+            SourceGloProcessor p;
+            p.setPlayConfigDetails (2, 2, 48000.0, 512);
+            p.prepareToPlay (48000.0, 512);
+
+            // Neutral macros so only the fix moves the measurement.
+            setParam (p, pid::punch, 0.0f);
+            setParam (p, pid::body, 0.0f);
+            setParam (p, pid::tone, 50.0f);
+            setParam (p, pid::air, 0.0f);
+            setParam (p, pid::stereo, 0.0f);
+            setParam (p, pid::transients, 0.0f);
+            setParam (p, pid::saturate, 0.0f);
+            setParam (p, pid::sourceType, 10.0f);   // Vocal profile
+            setParam (p, pid::fixAmount, 100.0f);
+
+            // A harsh, boxy "vocal": mid tone + strong 4 kHz excess.
+            juce::AudioBuffer<float> block (2, 512);
+            juce::MidiBuffer midi;
+            double ph1 = 0.0, ph2 = 0.0;
+            for (int b = 0; b < (int) (48000.0 * 3.0 / 512); ++b)
+            {
+                for (int i = 0; i < 512; ++i)
+                {
+                    const float v = 0.30f * (float) std::sin (ph1)
+                                  + 0.42f * (float) std::sin (ph2);
+                    ph1 += 2.0 * juce::MathConstants<double>::pi * 400.0 / 48000.0;
+                    ph2 += 2.0 * juce::MathConstants<double>::pi * 4000.0 / 48000.0;
+                    block.setSample (0, i, v);
+                    block.setSample (1, i, v);
+                }
+                p.processBlock (block, midi);
+            }
+
+            p.analyzeNow();
+            const int toneBefore = p.getAnalysis().tone;
+            const float devBefore = p.getAnalysis().bandDeviationDb[3];
+
+            p.requestFixSource();       // engages + async re-analysis (a DAW
+            p.analyzeNow();             // pumps it; tests publish directly)
+
+            const int toneAfter = p.getAnalysis().tone;
+            const float devAfter = p.getAnalysis().bandDeviationDb[3];
+
+            check (p.isFixEngaged(), "fix engaged for the reward loop");
+            check (toneAfter >= toneBefore + 10,
+                   "fix lifts the Tone pod (before " + juce::String (toneBefore)
+                     + ", after " + juce::String (toneAfter) + ")");
+            check (std::abs (devAfter) <= std::abs (devBefore) - 3.0f,
+                   "fix shrinks the HighMid deviation (before "
+                     + juce::String (devBefore, 1) + ", after "
+                     + juce::String (devAfter, 1) + ")");
+
+            // The Tone macro moves the Tone pod too: darker tilt counters
+            // this fixture's top-heavy excess even without the fix.
+            p.requestFixSource();       // release the fix
+            setParam (p, pid::tone, 0.0f);
+            p.analyzeNow();
+            const int toneDark = p.getAnalysis().tone;
+            check (toneDark > toneBefore,
+                   "Tone macro moves the Tone pod (flat " + juce::String (toneBefore)
+                     + " -> dark tilt " + juce::String (toneDark) + ")");
+        }
+
+        // --- headroom: engaging the fix on a hot source pulls the RESULT
+        //     under the ceiling, saturation nonlinearity included.
+        {
+            SourceGloProcessor p;
+            p.setPlayConfigDetails (2, 2, 48000.0, 512);
+            p.prepareToPlay (48000.0, 512);
+            // Default macros stay: transient boost + saturation are exactly
+            // what makes the linear trim estimate undershoot.
+
+            juce::AudioBuffer<float> block (2, 512);
+            juce::MidiBuffer midi;
+            double phase = 0.0;
+            for (int b = 0; b < (int) (48000.0 * 3.0 / 512); ++b)
+            {
+                for (int i = 0; i < 512; ++i)
+                {
+                    const double t = (b * 512 + i) / 48000.0;
+                    const double beat = std::fmod (t, 0.469);
+                    const float env = (float) std::exp (-beat * 10.0);
+                    phase += 2.0 * juce::MathConstants<double>::pi * (55.0 + 25.0 * env) / 48000.0;
+                    const float v = 0.92f * env * (float) std::sin (phase);
+                    block.setSample (0, i, v);
+                    block.setSample (1, i, v);
+                }
+                p.processBlock (block, midi);
+            }
+
+            p.analyzeNow();
+            p.requestFixSource();
+            p.analyzeNow();
+
+            bool headroomHot = false;
+            for (const auto& d : p.getAnalysis().diagnostics)
+                if (d.title == "Headroom Too Hot") headroomHot = true;
+            check (p.isFixEngaged(), "fix engaged on the hot kick");
+            check (! headroomHot,
+                   "fix holds the -1 dBTP ceiling through the nonlinear chain");
         }
 
         // --- engaging the fix snaps A/B back to the processed side.

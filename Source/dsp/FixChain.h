@@ -46,6 +46,11 @@ public:
     // engagement are applied on the audio thread.
     void engageFix (const AnalysisResult& analysis);
     void disengageFix();
+
+    // Tighten the headroom trim after measuring the engaged chain's actual
+    // output - the saturator is nonlinear, so the first trim estimate always
+    // undershoots on hot material.
+    void addTrimDb (float delta) noexcept;
     bool isFixEngaged() const noexcept          { return fixEngaged.load(); }
 
     // Raw correction values, for persistence (state save/load).

@@ -77,10 +77,23 @@ SourceGloProcessor::SourceGloProcessor()
     if (library.getIndexedCount() > 0)
         analysis.rescues = library.match (
             (int) apvts.getRawParameterValue (pid::sourceType)->load());
+
+    // The pods follow the knobs: any creative parameter marks the analysis
+    // dirty and the debounced re-analyzer refreshes it.
+    for (const char* id : { pid::sourceType, pid::fixAmount, pid::punch, pid::body,
+                            pid::tone, pid::air, pid::stereo, pid::transients,
+                            pid::saturate })
+        apvts.addParameterListener (id, this);
+    reanalyzer = std::make_unique<Reanalyzer> (*this);
 }
 
 SourceGloProcessor::~SourceGloProcessor()
 {
+    reanalyzer.reset();
+    for (const char* id : { pid::sourceType, pid::fixAmount, pid::punch, pid::body,
+                            pid::tone, pid::air, pid::stereo, pid::transients,
+                            pid::saturate })
+        apvts.removeParameterListener (id, this);
     library.changed.removeChangeListener (this);
     // A worker job captures a WeakReference, but the pool itself must not
     // outlive the object whose member it is.
@@ -328,19 +341,80 @@ void SourceGloProcessor::publishResult (const AnalysisResult& result)
     analysisChanged.sendChangeMessage();
 }
 
+// Renders the captured raw source through a private copy of the correction
+// chain under the CURRENT settings, so analysis measures what would actually
+// leave the plugin. A local chain keeps the audio-thread chain's filter and
+// envelope state untouched, and works with the transport stopped.
+void SourceGloProcessor::renderThroughChain (juce::AudioBuffer<float>& buffer,
+                                             double sampleRate)
+{
+    if (buffer.getNumSamples() == 0)
+        return;
+
+    constexpr int blockSize = 512;
+    FixChain offline;
+    offline.prepare (sampleRate, blockSize);
+    offline.setFixState (fixChain.getFixState(), fixChain.isFixEngaged());
+
+    FixChain::MacroValues macros;
+    auto pct = [this] (const char* id)
+    {
+        return apvts.getRawParameterValue (id)->load() * 0.01f;
+    };
+    macros.punch      = pct (pid::punch);
+    macros.body       = pct (pid::body);
+    macros.tone       = pct (pid::tone);
+    macros.air        = pct (pid::air);
+    macros.stereo     = pct (pid::stereo);
+    macros.transients = pct (pid::transients);
+    macros.saturate   = pct (pid::saturate);
+    macros.fixAmount  = pct (pid::fixAmount);
+    macros.oversampling = (int) apvts.getRawParameterValue (pid::oversampling)->load();
+    macros.hq         = apvts.getRawParameterValue (pid::hq)->load() > 0.5f;
+    macros.compare    = false;      // A/B is an audition tool, not a setting
+
+    // Let the chain's smoothers glide to their targets on silence first, so
+    // the start of the render is not measured under half-applied settings.
+    juce::AudioBuffer<float> warmup (2, blockSize);
+    for (int i = 0; i < 80; ++i)    // ~0.85 s at 48 kHz
+    {
+        warmup.clear();
+        offline.process (warmup, macros);
+    }
+
+    juce::AudioBuffer<float> block (2, blockSize);
+    for (int start = 0; start < buffer.getNumSamples(); start += blockSize)
+    {
+        const int n = juce::jmin (blockSize, buffer.getNumSamples() - start);
+        block.clear();
+        for (int ch = 0; ch < 2; ++ch)
+            block.copyFrom (ch, 0, buffer, juce::jmin (ch, buffer.getNumChannels() - 1),
+                            start, n);
+        offline.process (block, macros);
+        for (int ch = 0; ch < juce::jmin (2, buffer.getNumChannels()); ++ch)
+            buffer.copyFrom (ch, start, block, ch, 0, n);
+    }
+}
+
+juce::AudioBuffer<float> SourceGloProcessor::makeProcessedSnapshot()
+{
+    juce::AudioBuffer<float> snapshot;
+    capture.snapshot (snapshot);
+    renderThroughChain (snapshot, capture.sampleRate());
+    return snapshot;
+}
+
 void SourceGloProcessor::requestAnalyze()
 {
     if (analyzing.exchange (true))
         return;                                    // one pass at a time
 
-    // Snapshot on the calling (message) thread, crunch on the pool, publish
-    // back on the message thread. The WeakReference guards against the
-    // processor being destroyed while the job runs.
-    auto snapshot = std::make_shared<juce::AudioBuffer<float>>();
-    const int captured = capture.snapshot (*snapshot);
+    // Snapshot + offline chain render on the calling (message) thread, crunch
+    // on the pool, publish back on the message thread. The WeakReference
+    // guards against the processor being destroyed while the job runs.
+    auto snapshot = std::make_shared<juce::AudioBuffer<float>> (makeProcessedSnapshot());
     const double sr = capture.sampleRate();
     const int type = (int) apvts.getRawParameterValue (pid::sourceType)->load();
-    juce::ignoreUnused (captured);
 
     analysisPool.addJob ([safe = juce::WeakReference<SourceGloProcessor> (this),
                           snapshot, sr, type]
@@ -356,10 +430,33 @@ void SourceGloProcessor::requestAnalyze()
 
 void SourceGloProcessor::analyzeNow()
 {
-    juce::AudioBuffer<float> snapshot;
-    capture.snapshot (snapshot);
+    auto snapshot = makeProcessedSnapshot();
     const int type = (int) apvts.getRawParameterValue (pid::sourceType)->load();
     publishResult (AnalysisEngine::analyse (snapshot, capture.sampleRate(), type));
+}
+
+// -----------------------------------------------------------------------------
+//  Auto re-analysis: the pods follow the knobs.
+// -----------------------------------------------------------------------------
+void SourceGloProcessor::parameterChanged (const juce::String&, float)
+{
+    // Can fire on any thread (automation): just stamp the time; the
+    // message-thread timer does the work after a debounce.
+    dirtyAtMs.store (juce::Time::getMillisecondCounter());
+}
+
+void SourceGloProcessor::Reanalyzer::timerCallback()
+{
+    const auto dirty = owner.dirtyAtMs.load();
+    if (dirty == 0 || ! owner.analysis.analyzed || owner.analyzing.load())
+        return;
+
+    const auto now = juce::Time::getMillisecondCounter();
+    if (now - dirty < 400)          // let a knob drag settle
+        return;
+
+    owner.dirtyAtMs.store (0);
+    owner.requestAnalyze();
 }
 
 void SourceGloProcessor::togglePreview (const juce::String& path)
@@ -400,9 +497,36 @@ void SourceGloProcessor::requestFixSource()
         fixChain.engageFix (lastAnalysis);
         // Hearing the fix means being on the processed side of A/B.
         compareRaw.store (false);
+
+        // The chain is nonlinear (the saturator compresses less at lower
+        // drive), so a linear trim estimate undershoots on hot sources.
+        // Measure the engaged chain's actual true peak and tighten until the
+        // -1 dBTP ceiling really holds.
+        for (int iteration = 0; iteration < 3; ++iteration)
+        {
+            auto processed = makeProcessedSnapshot();
+            if (processed.getNumSamples() == 0)
+                break;
+
+            PolyphasePeakDetector tpL, tpR;
+            float tp = 0.0f;
+            const float* l = processed.getReadPointer (0);
+            const float* r = processed.getNumChannels() > 1 ? processed.getReadPointer (1) : l;
+            for (int i = 0; i < processed.getNumSamples(); ++i)
+                tp = juce::jmax (tp, tpL.peakForSample (l[i]), tpR.peakForSample (r[i]));
+
+            const float tpDb = juce::Decibels::gainToDecibels (tp, -120.0f);
+            if (tpDb <= -0.5f)
+                break;
+            fixChain.addTrimDb (-(tpDb + 1.0f));
+        }
     }
 
     analysisChanged.sendChangeMessage();
+
+    // Show the result immediately: the pods re-score the processed source.
+    dirtyAtMs.store (0);
+    requestAnalyze();
 }
 
 float SourceGloProcessor::truePeakSinceDb()

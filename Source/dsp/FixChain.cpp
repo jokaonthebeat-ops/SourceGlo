@@ -103,9 +103,16 @@ void FixChain::engageFix (const AnalysisResult& analysis)
                               ? -juce::jlimit (-8.0f, 8.0f, dev) : 0.0f);
     }
 
-    // Pull hot sources down to a -1 dBTP working ceiling.
-    fixTrimDb.store (analysis.truePeakDb > -0.3f
-                       ? juce::jlimit (-12.0f, 0.0f, -(analysis.truePeakDb + 1.0f))
+    // Pull the result down to a -1 dBTP working ceiling - accounting for the
+    // loudest boost the corrective EQ itself is about to add, or fixing the
+    // tone would re-blow the headroom the trim just reclaimed.
+    float maxBoost = 0.0f;
+    for (int b = 0; b < numFixBands; ++b)
+        maxBoost = juce::jmax (maxBoost, fixBandDb[b].load());
+
+    const float predictedTp = analysis.truePeakDb + maxBoost;
+    fixTrimDb.store (predictedTp > -1.0f
+                       ? juce::jlimit (-12.0f, 0.0f, -(predictedTp + 1.0f))
                        : 0.0f);
 
     fixLowMono.store (analysis.lowCorrelation < 0.5f);
@@ -116,6 +123,11 @@ void FixChain::engageFix (const AnalysisResult& analysis)
 void FixChain::disengageFix()
 {
     fixEngaged.store (false);
+}
+
+void FixChain::addTrimDb (float delta) noexcept
+{
+    fixTrimDb.store (juce::jlimit (-12.0f, 0.0f, fixTrimDb.load() + delta));
 }
 
 FixChain::FixState FixChain::getFixState() const
@@ -217,7 +229,9 @@ void FixChain::process (juce::AudioBuffer<float>& buffer, const MacroValues& m) 
     const bool engaged = fixEngaged.load();
     for (int b = 0; b < numFixBands; ++b)
         fixBandSm[b].setTargetValue (engaged ? fixBandDb[b].load() * m.fixAmount : 0.0f);
-    fixTrimSm.setTargetValue (engaged ? fixTrimDb.load() * m.fixAmount : 0.0f);
+    // The headroom trim is a safety ceiling, not a flavour: it applies in
+    // full whenever the fix is engaged, regardless of Fix Amount.
+    fixTrimSm.setTargetValue (engaged ? fixTrimDb.load() : 0.0f);
     lowMonoSm.setTargetValue (engaged && fixLowMono.load() ? 1.0f : 0.0f);
     bodySm.setTargetValue (m.body);
     toneSm.setTargetValue (m.tone);

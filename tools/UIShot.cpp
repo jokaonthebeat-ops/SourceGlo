@@ -158,7 +158,10 @@ int main (int argc, char** argv)
         processor.analyzeNow();
 
         if (wantFix)
+        {
             processor.requestFixSource();
+            processor.analyzeNow();     // publish the post-fix scores headlessly
+        }
     }
 
     if (sgEditor != nullptr && wantTab > 0)

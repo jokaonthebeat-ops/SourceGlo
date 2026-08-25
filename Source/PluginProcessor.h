@@ -45,7 +45,8 @@ namespace pid
 }
 
 class SourceGloProcessor : public juce::AudioProcessor,
-                           private juce::ChangeListener
+                           private juce::ChangeListener,
+                           private juce::AudioProcessorValueTreeState::Listener
 {
 public:
     SourceGloProcessor();
@@ -90,8 +91,11 @@ public:
     juce::ChangeBroadcaster analysisChanged;
 
     // Command-style actions (master prompt: callbacks, not parameters).
-    // requestAnalyze snapshots the capture ring and runs the engine on a
-    // worker thread; analyzeNow runs it synchronously (tests, headless tools).
+    // Analysis measures the source AS PROCESSED by the current fix and macro
+    // settings: the captured raw audio is rendered offline through a copy of
+    // the chain first, so scores respond to Fix Source and the macros - and
+    // re-analysis works even when the transport is stopped. requestAnalyze
+    // runs on a worker thread; analyzeNow synchronously (tests, headless).
     void requestAnalyze();
     void analyzeNow();
     void requestFixSource();
@@ -141,6 +145,21 @@ private:
     std::vector<float> fftBuffer;
 
     void publishResult (const AnalysisResult& result);
+    void renderThroughChain (juce::AudioBuffer<float>& buffer, double sampleRate);
+    juce::AudioBuffer<float> makeProcessedSnapshot();
+
+    // Auto re-analysis: creative parameter changes and fix toggles mark the
+    // analysis dirty; a debounced message-thread timer re-runs it so the
+    // pods follow the knobs. First analysis stays manual.
+    void parameterChanged (const juce::String&, float) override;
+    struct Reanalyzer : public juce::Timer
+    {
+        SourceGloProcessor& owner;
+        explicit Reanalyzer (SourceGloProcessor& o) : owner (o) { startTimer (150); }
+        void timerCallback() override;
+    };
+    std::atomic<juce::uint32> dirtyAtMs { 0 };
+    std::unique_ptr<Reanalyzer> reanalyzer;
 
     CaptureRing capture;
     TruePeakMeter liveTruePeak;
