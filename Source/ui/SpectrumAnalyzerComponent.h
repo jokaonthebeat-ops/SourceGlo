@@ -21,7 +21,8 @@
 namespace sourceglo
 {
 
-class SpectrumAnalyzerComponent : public juce::Component, private juce::Timer
+class SpectrumAnalyzerComponent : public juce::Component, private juce::Timer,
+                                  private juce::ChangeListener
 {
 public:
     explicit SpectrumAnalyzerComponent (SourceGloProcessor& p)
@@ -47,7 +48,33 @@ public:
         displayDb.fill (-60.0f);
         smoothedDb.fill (-60.0f);
 
+        processor.analysisChanged.addChangeListener (this);
         startTimerHz (33);
+    }
+
+    ~SpectrumAnalyzerComponent() override
+    {
+        processor.analysisChanged.removeChangeListener (this);
+    }
+
+    void changeListenerCallback (juce::ChangeBroadcaster*) override
+    {
+        followFixState();
+    }
+
+    // When the fix engages, show its result: flip the display to Post so
+    // pressing the gold button visibly changes the curve; flip back on
+    // release. Called from both the change listener and the display timer,
+    // so it cannot be missed by async delivery order (or headless renders).
+    void followFixState()
+    {
+        const bool engaged = processor.isFixEngaged();
+        if (engaged == lastFixEngaged)
+            return;
+        lastFixEngaged = engaged;
+        postButton.setToggleState (engaged, juce::dontSendNotification);
+        preButton.setToggleState (! engaged, juce::dontSendNotification);
+        repaint();
     }
 
     void resized() override
@@ -224,6 +251,8 @@ private:
         if (! isShowing() && ! headlessRefreshMode())
             return;
 
+        followFixState();
+
         // Drain both taps every tick (so neither backlogs); display the one
         // the Pre/Post selector asks for.
         const bool post = postButton.getToggleState();
@@ -290,6 +319,7 @@ private:
 
     SmallPill preButton  { "Pre",  "Pre" };
     SmallPill postButton { "Post", "Post" };
+    bool lastFixEngaged = false;
 };
 
 } // namespace sourceglo

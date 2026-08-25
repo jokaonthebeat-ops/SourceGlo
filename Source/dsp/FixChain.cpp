@@ -93,14 +93,14 @@ void FixChain::engageFix (const AnalysisResult& analysis)
 {
     for (int b = 0; b < numFixBands; ++b)
     {
-        // Counter the measured deviation beyond a +/-2 dB deadzone, capped at
-        // +/-8 dB - correction, not re-design.
+        // Counter the FULL measured deviation (capped +/-8 dB) whenever it
+        // exceeds a +/-2 dB gate. The gate used to be SUBTRACTED as a
+        // deadzone, which - multiplied by the 50 % default Fix Amount -
+        // turned a +6 dB problem into a -2 dB nudge nobody could hear.
+        // Correction, not re-design, is enforced by the cap alone.
         const float dev = analysis.bandDeviationDb[b];
-        float gain = 0.0f;
-        if (std::abs (dev) > 2.0f)
-            gain = -juce::jlimit (-8.0f, 8.0f,
-                                  (std::abs (dev) - 2.0f) * (dev > 0 ? 1.0f : -1.0f));
-        fixBandDb[b].store (gain);
+        fixBandDb[b].store (std::abs (dev) > 2.0f
+                              ? -juce::jlimit (-8.0f, 8.0f, dev) : 0.0f);
     }
 
     // Pull hot sources down to a -1 dBTP working ceiling.

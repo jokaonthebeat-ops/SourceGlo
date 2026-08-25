@@ -15,6 +15,69 @@
 namespace sourceglo
 {
 
+// The gold button doubles as the Fix Amount control: once the fix is
+// engaged, dragging vertically on it rides the amount like a knob (with a
+// live "FIX - N%" label); a plain click still toggles. The drag swallows the
+// click via consumeDragFlag() so releasing a drag never disengages the fix.
+class FixSourceButton : public AssetButton
+{
+public:
+    explicit FixSourceButton (SourceGloProcessor& p)
+        : AssetButton ("Fix Source", ButtonKind::mainGold, "FIX SOURCE", "fix_source"),
+          processor (p) {}
+
+    bool consumeDragFlag()
+    {
+        const bool was = dragConsumed;
+        dragConsumed = false;
+        return was;
+    }
+
+    void mouseDown (const juce::MouseEvent& e) override
+    {
+        dragging = false;
+        startValue = processor.getAPVTS().getRawParameterValue (pid::fixAmount)->load();
+        AssetButton::mouseDown (e);
+    }
+
+    void mouseDrag (const juce::MouseEvent& e) override
+    {
+        const int dy = -e.getDistanceFromDragStartY();
+        if (processor.isFixEngaged() && (dragging || std::abs (dy) >= 6))
+        {
+            auto* param = processor.getAPVTS().getParameter (pid::fixAmount);
+            if (param == nullptr)
+                return;
+            if (! dragging)
+            {
+                dragging = true;
+                param->beginChangeGesture();
+            }
+            param->setValueNotifyingHost (juce::jlimit (0.0f, 1.0f,
+                (startValue + (float) dy * 0.5f) * 0.01f));
+            return;
+        }
+        AssetButton::mouseDrag (e);
+    }
+
+    void mouseUp (const juce::MouseEvent& e) override
+    {
+        if (dragging)
+        {
+            dragging = false;
+            dragConsumed = true;
+            if (auto* param = processor.getAPVTS().getParameter (pid::fixAmount))
+                param->endChangeGesture();
+        }
+        AssetButton::mouseUp (e);
+    }
+
+private:
+    SourceGloProcessor& processor;
+    bool dragging = false, dragConsumed = false;
+    float startValue = 50.0f;
+};
+
 class SourceScoreHUD : public juce::Component, private juce::Timer,
                        private juce::ChangeListener
 {
@@ -38,7 +101,11 @@ public:
         addAndMakeVisible (abButton);
 
         analyzeButton.onClick = [this] { processor.requestAnalyze(); };
-        fixButton.onClick     = [this] { processor.requestFixSource(); };
+        fixButton.onClick     = [this]
+        {
+            if (! fixButton.consumeDragFlag())   // a drag adjusts, never toggles
+                processor.requestFixSource();
+        };
         abButton.onClick      = [this] { processor.setCompareRaw (abButton.getToggleState()); };
 
         processor.analysisChanged.addChangeListener (this);
@@ -209,6 +276,11 @@ private:
         const auto& model = processor.getAnalysis();
         fixButton.setEnabled (model.analyzed);
         fixButton.setToggleState (processor.isFixEngaged(), juce::dontSendNotification);
+        fixButton.setTooltip (processor.isFixEngaged()
+            ? "Fix engaged - drag up/down for the amount, click to release"
+            : "Apply intelligent source correction (analyze first)");
+        // A/B follows the processor (engaging the fix snaps back to A).
+        abButton.setToggleState (processor.isComparingRaw(), juce::dontSendNotification);
         repaint();
     }
 
@@ -216,6 +288,19 @@ private:
     {
         if (! isShowing() && ! headlessRefreshMode())
             return;
+
+        // The gold button reads out the live fix amount while engaged.
+        const auto wanted = processor.isFixEngaged()
+            ? "FIX " + juce::String (juce::CharPointer_UTF8 ("\xc2\xb7 "))
+                + juce::String ((int) std::lround (
+                      processor.getAPVTS().getRawParameterValue (pid::fixAmount)->load()))
+                + "%"
+            : juce::String ("FIX SOURCE");
+        if (wanted != lastFixLabel)
+        {
+            lastFixLabel = wanted;
+            fixButton.setLabel (wanted);
+        }
 
         // Smooth the score toward its target - no abrupt jumps (master prompt).
         const float target = processor.getAnalysis().analyzed
@@ -230,8 +315,9 @@ private:
     SourceGloProcessor& processor;
 
     AssetButton analyzeButton { "Analyze",    ButtonKind::mainCyan,    "ANALYZE",    "analyze" };
-    AssetButton fixButton     { "Fix Source", ButtonKind::mainGold,    "FIX SOURCE", "fix_source" };
+    FixSourceButton fixButton { processor };
     AssetButton abButton      { "A / B",      ButtonKind::mainNeutral, "A / B",      "ab" };
+    juce::String lastFixLabel;
 
     float displayScore = 0.0f;   // animates up on first open
 };

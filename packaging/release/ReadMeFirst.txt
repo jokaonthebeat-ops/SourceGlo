@@ -62,7 +62,10 @@ TIPS
 ----
 
   - Analysis measures the SOURCE (before the fix), so the score tells you
-    what you are working with. Judge the fix by ear and the Post spectrum.
+    what you are working with. When you press FIX SOURCE the spectrum
+    flips to Post so you can see the correction working; A/B it to hear it.
+  - While the fix is engaged the gold button reads FIX - 50%. Drag up or
+    down on it to ride the amount from a nudge to the full correction.
   - Presets cover the creative controls only. Your gain staging, routing
     and quality settings never jump when you switch presets.
   - Cmd+Z undoes a preset switch.

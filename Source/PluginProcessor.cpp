@@ -396,7 +396,11 @@ void SourceGloProcessor::requestFixSource()
     if (fixChain.isFixEngaged())
         fixChain.disengageFix();
     else
+    {
         fixChain.engageFix (lastAnalysis);
+        // Hearing the fix means being on the processed side of A/B.
+        compareRaw.store (false);
+    }
 
     analysisChanged.sendChangeMessage();
 }

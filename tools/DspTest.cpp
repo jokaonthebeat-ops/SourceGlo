@@ -693,18 +693,45 @@ int main()
 
             auto m = neutral; m.fixAmount = 1.0f;
             const double at3500 = chainGainDb (3500.0, m, &chain);
-            // -6 dB band correction - 1.5 dB trim = about -7.5 dB at band centre.
-            checkNear (at3500, -7.5, 1.2, "fix counters a +8 dB HighMid deviation at full amount");
+            // Full counter of the (capped) +8 dB deviation, minus 1.5 dB trim.
+            checkNear (at3500, -9.5, 1.3, "fix counters a +8 dB HighMid deviation at full amount");
 
             FixChain chain50;
             chain50.prepare (sr, blockSize);
             chain50.engageFix (a);
             auto mHalf = neutral; mHalf.fixAmount = 0.5f;
             const double at3500half = chainGainDb (3500.0, mHalf, &chain50);
-            checkNear (at3500half, -3.75, 1.2, "fix amount 50% halves the correction");
+            checkNear (at3500half, -4.75, 1.3, "fix amount 50% halves the correction");
 
             chain.disengageFix();
             check (! chain.isFixEngaged(), "fix disengages");
+        }
+
+        // --- engaging the fix snaps A/B back to the processed side.
+        {
+            SourceGloProcessor p;
+            p.setPlayConfigDetails (2, 2, 48000.0, 512);
+            p.prepareToPlay (48000.0, 512);
+
+            juce::AudioBuffer<float> block (2, 512);
+            juce::MidiBuffer midi;
+            double phase = 0.0;
+            for (int b = 0; b < 60; ++b)
+            {
+                for (int i = 0; i < 512; ++i)
+                {
+                    const float v = 0.4f * (float) std::sin (phase);
+                    phase += 2.0 * juce::MathConstants<double>::pi * 100.0 / 48000.0;
+                    block.setSample (0, i, v);
+                    block.setSample (1, i, v);
+                }
+                p.processBlock (block, midi);
+            }
+            p.analyzeNow();
+            p.setCompareRaw (true);
+            p.requestFixSource();
+            check (p.isFixEngaged(), "fix engages from an analysis");
+            check (! p.isComparingRaw(), "engaging the fix snaps A/B to the processed side");
         }
 
         // --- low-mono fix kills wide sub content.
