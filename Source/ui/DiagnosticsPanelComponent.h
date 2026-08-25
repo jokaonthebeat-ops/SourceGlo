@@ -11,7 +11,8 @@
 namespace sourceglo
 {
 
-class DiagnosticsPanelComponent : public juce::Component
+class DiagnosticsPanelComponent : public juce::Component,
+                                  private juce::ChangeListener
 {
 public:
     explicit DiagnosticsPanelComponent (SourceGloProcessor& p) : processor (p)
@@ -20,6 +21,12 @@ public:
         cornerButton.setTooltip ("Diagnostics options");
         cornerButton.setIconPadding (5.0f);
         addAndMakeVisible (cornerButton);
+        processor.analysisChanged.addChangeListener (this);
+    }
+
+    ~DiagnosticsPanelComponent() override
+    {
+        processor.analysisChanged.removeChangeListener (this);
     }
 
     void resized() override
@@ -36,6 +43,20 @@ public:
         const auto& diags = processor.getAnalysis().diagnostics;
         for (int i = 0; i < (int) diags.size() && i < 4; ++i)
             drawCard (g, { 32, 66 + i * 98, 380, 84 }, diags[(size_t) i], i == hoverIndex);
+
+        if (diags.empty())
+        {
+            // Nothing analysed yet.
+            if (auto* ic = Assets::icon ("analyze", tokens::muted))
+                ic->drawWithin (g, juce::Rectangle<float> (192.0f, 190.0f, 60.0f, 60.0f),
+                                juce::RectanglePlacement::centred, 0.6f);
+            g.setFont (Fonts::bodyLabel());
+            g.setColour (tokens::muted);
+            g.drawText ("Play the source and press Analyze",
+                        32, 262, 380, 16, juce::Justification::centred);
+            g.drawText ("to see its diagnostics.",
+                        32, 280, 380, 16, juce::Justification::centred);
+        }
     }
 
     void mouseMove (const juce::MouseEvent& e) override
@@ -161,6 +182,8 @@ private:
         g.strokePath (p, juce::PathStrokeType (1.6f, juce::PathStrokeType::curved,
                                                juce::PathStrokeType::rounded));
     }
+
+    void changeListenerCallback (juce::ChangeBroadcaster*) override  { repaint(); }
 
     SourceGloProcessor& processor;
     IconButton cornerButton { "Diagnostics options", "menu" };

@@ -259,6 +259,220 @@ int main()
         check (p.outPeak[0].load() > 0.01f, "output meter tap alive");
     }
 
+    // ----------------------------------------------------------------- engine
+    std::printf ("- analysis engine (ground-truth fixtures)\n");
+    {
+        const double sr = 48000.0;
+
+        auto makeSine = [&] (double freq, float amp, double seconds, double phase = 0.0)
+        {
+            juce::AudioBuffer<float> b (2, (int) (sr * seconds));
+            for (int i = 0; i < b.getNumSamples(); ++i)
+            {
+                const float v = amp * (float) std::sin (2.0 * juce::MathConstants<double>::pi
+                                                          * freq * i / sr + phase);
+                b.setSample (0, i, v);
+                b.setSample (1, i, v);
+            }
+            return b;
+        };
+
+        auto makeKickPattern = [&] (double bpm, double seconds)
+        {
+            juce::AudioBuffer<float> b (2, (int) (sr * seconds));
+            const double beat = 60.0 / bpm;
+            double phase = 0.0;
+            for (int i = 0; i < b.getNumSamples(); ++i)
+            {
+                const double t = i / sr;
+                const double beatPos = std::fmod (t, beat);
+                const float env = (float) std::exp (-beatPos * 12.0);
+                phase += 2.0 * juce::MathConstants<double>::pi * (55.0 + 30.0 * env) / sr;
+                const float v = 0.8f * env * (float) std::sin (phase);
+                b.setSample (0, i, v);
+                b.setSample (1, i, v);
+            }
+            return b;
+        };
+
+        auto makeTriad = [&] (double f1, double f2, double f3, double seconds)
+        {
+            juce::AudioBuffer<float> b (2, (int) (sr * seconds));
+            b.clear();
+            const double freqs[] = { f1, f2, f3, f1 * 2.0, f2 * 2.0, f3 * 2.0 };
+            const float amps[]   = { 0.30f, 0.22f, 0.22f, 0.12f, 0.08f, 0.08f };
+            for (int v = 0; v < 6; ++v)
+                for (int i = 0; i < b.getNumSamples(); ++i)
+                {
+                    const float x = amps[v] * (float) std::sin (2.0 * juce::MathConstants<double>::pi
+                                                                  * freqs[v] * i / sr);
+                    b.addSample (0, i, x);
+                    b.addSample (1, i, x);
+                }
+            return b;
+        };
+
+        // --- stats against exact values: 1 kHz sine at -6.02 dBFS.
+        {
+            const auto r = AnalysisEngine::analyse (makeSine (1000.0, 0.5f, 3.0), sr, 0);
+            check (r.enoughAudio, "sine: enough audio");
+            checkNear (r.peakDb, -6.02, 0.15, "sine peak");
+            checkNear (r.rmsDb, -9.03, 0.15, "sine RMS");
+            checkNear (r.crestDb, 3.01, 0.25, "sine crest");
+            checkNear (r.truePeakDb, -6.02, 0.35, "sine true peak");
+            checkNear (r.durationSeconds, 3.0, 0.1, "sine duration");
+        }
+
+        // --- true peak absolute: full-scale fs/4 sine at 45 degrees puts
+        //     every sample on +/-0.7071 while the waveform touches 1.0.
+        {
+            const auto r = AnalysisEngine::analyse (
+                makeSine (sr / 4.0, 1.0f, 2.0, juce::MathConstants<double>::pi / 4.0), sr, 0);
+            checkNear (r.peakDb, -3.01, 0.1, "fs/4 sample peak reads -3");
+            checkNear (r.truePeakDb, 0.0, 0.35, "fs/4 true peak reads 0 dBTP");
+        }
+
+        // --- tempo from kick patterns.
+        {
+            const auto r128 = AnalysisEngine::analyse (makeKickPattern (128.0, 6.0), sr, 1);
+            checkNear (r128.tempoBpm, 128.0, 2.0, "tempo 128 BPM detected");
+
+            const auto r92 = AnalysisEngine::analyse (makeKickPattern (92.0, 6.0), sr, 1);
+            checkNear (r92.tempoBpm, 92.0, 2.0, "tempo 92 BPM detected");
+        }
+
+        // --- key from triads (C minor: C-Eb-G, A major: A-C#-E).
+        {
+            const auto cm = AnalysisEngine::analyse (makeTriad (130.81, 155.56, 196.00, 4.0), sr, 9);
+            check (cm.keyName == "C Minor", "C minor triad -> C Minor (got '"
+                                              + cm.keyName + "')");
+
+            const auto am = AnalysisEngine::analyse (makeTriad (110.00, 138.59, 164.81, 4.0), sr, 9);
+            check (am.keyName == "A Major", "A major triad -> A Major (got '"
+                                              + am.keyName + "')");
+        }
+
+        // --- clipping detection.
+        {
+            auto clipped = makeSine (60.0, 1.4f, 2.0);
+            for (int ch = 0; ch < 2; ++ch)
+            {
+                auto* d = clipped.getWritePointer (ch);
+                for (int i = 0; i < clipped.getNumSamples(); ++i)
+                    d[i] = juce::jlimit (-1.0f, 1.0f, d[i]);
+            }
+            const auto rc = AnalysisEngine::analyse (clipped, sr, 1);
+            bool foundClip = false, foundClean = false;
+            for (const auto& d : rc.diagnostics)
+                if (d.title == "Digital Clipping Detected") foundClip = true;
+            check (foundClip, "clipped signal raises the clipping diagnostic");
+
+            const auto rq = AnalysisEngine::analyse (makeSine (60.0, 0.5f, 2.0), sr, 1);
+            for (const auto& d : rq.diagnostics)
+                if (d.title == "Clipping Clean") foundClean = true;
+            check (foundClean, "clean signal reports Clipping Clean");
+        }
+
+        // --- phase: dual mono vs polarity-flipped right channel.
+        {
+            juce::AudioBuffer<float> noise (2, (int) (sr * 2.0));
+            juce::Random rng (0x5eed);
+            for (int i = 0; i < noise.getNumSamples(); ++i)
+            {
+                const float v = rng.nextFloat() * 0.8f - 0.4f;
+                noise.setSample (0, i, v);
+                noise.setSample (1, i, v);
+            }
+            const auto mono = AnalysisEngine::analyse (noise, sr, 0);
+            check (mono.phase >= 90, "dual mono scores phase >= 90 (got "
+                                       + juce::String (mono.phase) + ")");
+
+            for (int i = 0; i < noise.getNumSamples(); ++i)
+                noise.setSample (1, i, -noise.getSample (0, i));
+            const auto flipped = AnalysisEngine::analyse (noise, sr, 0);
+            check (flipped.enoughAudio, "flipped polarity is analysed, not gated as silence");
+            check (flipped.phase <= 20, "flipped polarity scores phase <= 20 (got "
+                                          + juce::String (flipped.phase) + ")");
+            bool foundPhase = false;
+            for (const auto& d : flipped.diagnostics)
+                if (d.title == "Phase Cancellation Risk") foundPhase = true;
+            check (foundPhase, "flipped polarity raises the phase diagnostic");
+        }
+
+        // --- not enough audio.
+        {
+            const auto r = AnalysisEngine::analyse (makeSine (200.0, 0.5f, 0.2), sr, 0);
+            check (! r.enoughAudio, "0.2 s of audio is not enough to analyse");
+            check (! r.diagnostics.empty()
+                     && r.diagnostics[0].title == "Not Enough Audio",
+                   "not-enough-audio diagnostic present");
+        }
+
+        // --- tone ordering: a kick-shaped source beats white noise as a Kick.
+        {
+            juce::AudioBuffer<float> noise (2, (int) (sr * 3.0));
+            juce::Random rng (0xa153);
+            for (int i = 0; i < noise.getNumSamples(); ++i)
+            {
+                const float v = rng.nextFloat() * 1.0f - 0.5f;
+                noise.setSample (0, i, v);
+                noise.setSample (1, i, v);
+            }
+            const auto kick = AnalysisEngine::analyse (makeKickPattern (128.0, 3.0), sr, 1);
+            const auto hiss = AnalysisEngine::analyse (noise, sr, 1);
+            check (kick.tone > hiss.tone,
+                   "kick fixture out-scores white noise on Kick tone ("
+                     + juce::String (kick.tone) + " vs " + juce::String (hiss.tone) + ")");
+        }
+
+        // --- sub conflict: a pure 50 Hz sine is on-target for a Kick but
+        //     sub-heavy for a Loop.
+        {
+            const auto asKick = AnalysisEngine::analyse (makeSine (50.0, 0.5f, 2.0), sr, 1);
+            check (asKick.conflictHiHz <= asKick.conflictLoHz,
+                   "pure sub as Kick raises no conflict overlay");
+
+            const auto asLoop = AnalysisEngine::analyse (makeSine (50.0, 0.5f, 2.0), sr, 8);
+            check (asLoop.conflictHiHz > asLoop.conflictLoHz,
+                   "pure sub as Loop raises the low-end conflict overlay");
+        }
+
+        // --- determinism.
+        {
+            const auto buffer = makeKickPattern (120.0, 3.0);
+            const auto a = AnalysisEngine::analyse (buffer, sr, 1);
+            const auto b = AnalysisEngine::analyse (buffer, sr, 1);
+            check (a.score == b.score && a.tone == b.tone && a.tempoBpm == b.tempoBpm,
+                   "identical audio gives identical results");
+        }
+
+        // --- full publish path through the processor.
+        {
+            SourceGloProcessor p;
+            p.setPlayConfigDetails (2, 2, 48000.0, 512);
+            p.prepareToPlay (48000.0, 512);
+
+            check (! p.getAnalysis().analyzed, "model starts unanalysed");
+
+            auto feed = makeKickPattern (128.0, 4.0);
+            juce::AudioBuffer<float> block (2, 512);
+            juce::MidiBuffer midi;
+            for (int start = 0; start + 512 <= feed.getNumSamples(); start += 512)
+            {
+                for (int ch = 0; ch < 2; ++ch)
+                    block.copyFrom (ch, 0, feed, ch, start, 512);
+                p.processBlock (block, midi);
+            }
+
+            p.analyzeNow();
+            const auto& m = p.getAnalysis();
+            check (m.analyzed, "analyzeNow marks the model analysed");
+            check (m.score >= 0 && m.score <= 100, "score in range");
+            check (m.stats.durationSec > 3.0f, "duration captured");
+            check (! m.diagnostics.empty(), "diagnostics produced");
+        }
+    }
+
     // ------------------------------------------------------------------ state
     std::printf ("- state round-trip\n");
     {

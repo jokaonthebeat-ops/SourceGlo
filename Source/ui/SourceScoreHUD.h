@@ -15,7 +15,8 @@
 namespace sourceglo
 {
 
-class SourceScoreHUD : public juce::Component, private juce::Timer
+class SourceScoreHUD : public juce::Component, private juce::Timer,
+                       private juce::ChangeListener
 {
 public:
     explicit SourceScoreHUD (SourceGloProcessor& p) : processor (p)
@@ -38,7 +39,13 @@ public:
         analyzeButton.onClick = [this] { processor.requestAnalyze(); };
         fixButton.onClick     = [this] { processor.requestFixSource(); };
 
+        processor.analysisChanged.addChangeListener (this);
         startTimerHz (30);
+    }
+
+    ~SourceScoreHUD() override
+    {
+        processor.analysisChanged.removeChangeListener (this);
     }
 
     void resized() override
@@ -77,6 +84,7 @@ public:
         // and +135; the approved mockup fills the gold from the +135 end
         // backwards (top -> clockwise -> bottom right), leaving the base
         // art's static cyan visible on the unfilled side.
+        if (model.analyzed)
         {
             const float radius = ringSize * 0.5f * 0.765f;
             const float endRad   = juce::degreesToRadians (135.0f);
@@ -97,29 +105,34 @@ public:
         const int cx = (int) ringRect.getCentreX();
         const int score = juce::roundToInt (displayScore);
 
-        g.setColour (tokens::white);
+        const juce::String dash (juce::CharPointer_UTF8 ("\xe2\x80\x93\xe2\x80\x93"));
+
+        g.setColour (model.analyzed ? tokens::white : tokens::muted);
         g.setFont (Fonts::mainScore());
-        g.drawText (juce::String (score), cx - 120, 95, 240, 84, juce::Justification::centred);
+        g.drawText (model.analyzed ? juce::String (score) : dash,
+                    cx - 120, 95, 240, 84, juce::Justification::centred);
 
         g.setFont (Fonts::hudLabel());
         g.setColour (tokens::hudLabel);
         g.drawText ("SOURCE SCORE", cx - 120, 177, 240, 18, juce::Justification::centred);
 
-        // Status pill from the supplied art, drawn ~150x28.
-        const auto phrase = ScoreStatus::phrase (score);
         // The pill art is background-only; the phrase is drawn live on top.
-        auto pill = Assets::statusPill (phrase);
+        // Before the first analysis the pill invites one instead of judging.
+        const auto phrase = model.analyzed ? ScoreStatus::phrase (score)
+                                           : juce::String ("PRESS ANALYZE");
+        const auto phraseColour = model.analyzed ? ScoreStatus::colour (score) : tokens::muted;
+        auto pill = model.analyzed ? Assets::statusPill (phrase) : juce::Image();
         const juce::Rectangle<float> pillRect ((float) cx - 75.0f, 205.0f, 150.0f, 28.0f);
         if (pill.isValid())
             g.drawImage (pill, pillRect, juce::RectanglePlacement::stretchToFit);
         else
         {
-            g.setColour (ScoreStatus::colour (score).withAlpha (0.15f));
+            g.setColour (phraseColour.withAlpha (0.15f));
             g.fillRoundedRectangle (pillRect, 6.0f);
-            g.setColour (ScoreStatus::colour (score));
+            g.setColour (phraseColour);
             g.drawRoundedRectangle (pillRect, 6.0f, 1.2f);
         }
-        g.setColour (ScoreStatus::colour (score));
+        g.setColour (phraseColour);
         g.setFont (Fonts::make (13.5f, false, true).withExtraKerningFactor (0.09f));
         g.drawText (phrase, pillRect.toNearestInt(), juce::Justification::centred);
 
@@ -129,11 +142,11 @@ public:
         g.drawText ("modern pro standard",     cx - 120, 258, 240, 15, juce::Justification::centred);
 
         // --- pods: label / value / "/100". Layout rects hero-local.
-        drawPod (g, { 153,  45, 96,  96 }, "TONE",  model.tone);
-        drawPod (g, { 146, 210, 96,  96 }, "PUNCH", model.punch);
-        drawPod (g, { 636,  45, 96,  96 }, "LEVEL", model.level);
-        drawPod (g, { 640, 210, 96,  96 }, "PHASE", model.phase);
-        drawPod (g, { 388, 301, 102, 102 }, "FIT",  model.fit);
+        drawPod (g, { 153,  45, 96,  96 }, "TONE",  model.tone,  model.analyzed);
+        drawPod (g, { 146, 210, 96,  96 }, "PUNCH", model.punch, model.analyzed);
+        drawPod (g, { 636,  45, 96,  96 }, "LEVEL", model.level, model.analyzed);
+        drawPod (g, { 640, 210, 96,  96 }, "PHASE", model.phase, model.analyzed);
+        drawPod (g, { 388, 301, 102, 102 }, "FIT",  model.fit,   model.analyzed);
     }
 
 private:
@@ -154,9 +167,9 @@ private:
     }
 
     void drawPod (juce::Graphics& g, juce::Rectangle<int> r,
-                  const juce::String& label, int value)
+                  const juce::String& label, int value, bool analyzed)
     {
-        auto art = Assets::metricPod (podColourFor (value));
+        auto art = Assets::metricPod (analyzed ? podColourFor (value) : PodColour::cyan);
         if (art.isValid())
         {
             g.setImageResamplingQuality (juce::Graphics::highResamplingQuality);
@@ -177,8 +190,10 @@ private:
                     juce::Justification::centred);
 
         g.setFont (Fonts::metricValue());
-        g.setColour (podTextColour (value));
-        g.drawText (juce::String (value), r.getX(), r.getY() + (int) (h * 0.36f),
+        g.setColour (analyzed ? podTextColour (value) : tokens::muted);
+        g.drawText (analyzed ? juce::String (value)
+                             : juce::String (juce::CharPointer_UTF8 ("\xe2\x80\x93\xe2\x80\x93")),
+                    r.getX(), r.getY() + (int) (h * 0.36f),
                     r.getWidth(), 28, juce::Justification::centred);
 
         g.setFont (Fonts::make (10.0f));
@@ -187,13 +202,19 @@ private:
                     juce::Justification::centred);
     }
 
+    void changeListenerCallback (juce::ChangeBroadcaster*) override
+    {
+        repaint();
+    }
+
     void timerCallback() override
     {
         if (! isShowing() && ! headlessRefreshMode())
             return;
 
         // Smooth the score toward its target - no abrupt jumps (master prompt).
-        const float target = (float) processor.getAnalysis().score;
+        const float target = processor.getAnalysis().analyzed
+                               ? (float) processor.getAnalysis().score : 0.0f;
         if (std::abs (displayScore - target) > 0.05f)
         {
             displayScore += (target - displayScore) * 0.12f;

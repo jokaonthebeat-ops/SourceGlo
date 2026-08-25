@@ -60,7 +60,7 @@ int main (int argc, char** argv)
         // for the meters and the FFT path to display something honest.
         const double sr = 48000.0;
         const int blockSize = 512;
-        const int blocks = (int) (sr * 1.2 / blockSize);
+        const int blocks = (int) (sr * 5.0 / blockSize);
 
         juce::AudioBuffer<float> audio (2, blockSize);
         juce::MidiBuffer midi;
@@ -92,6 +92,10 @@ int main (int argc, char** argv)
             if (sgEditor != nullptr && block % 3 == 0)
                 sgEditor->refreshDisplays();
         }
+
+        // Real analysis of the captured test feed - the shot shows the
+        // engine's actual verdict on it.
+        processor.analyzeNow();
     }
 
     // Let the animated displays settle (score climb, spectrum smoothing).

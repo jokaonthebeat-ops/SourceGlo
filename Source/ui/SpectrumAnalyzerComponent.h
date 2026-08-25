@@ -16,6 +16,7 @@
 #pragma once
 #include "Widgets.h"
 #include "../PluginProcessor.h"
+#include "../dsp/AnalysisEngine.h"
 
 namespace sourceglo
 {
@@ -181,11 +182,16 @@ private:
 
     void drawReferenceTrace (juce::Graphics& g, juce::Rectangle<float> plot)
     {
+        // The dashed reference is the target curve for the selected source
+        // type, drawn with its loudest point at -14 dB display level.
+        const int type = (int) processor.getAPVTS().getRawParameterValue (pid::sourceType)->load();
+
         juce::Path ref;
         for (int i = 0; i < numBins; ++i)
         {
             const float x = hzToX (plot, binHz (i));
-            const float y = dbToY (plot, referenceDb (binHz (i)));
+            const float y = dbToY (plot, juce::jlimit (-58.0f, 12.0f,
+                                -14.0f + AnalysisEngine::targetCurveDb (type, binHz (i))));
             if (i == 0) ref.startNewSubPath (x, y);
             else        ref.lineTo (x, y);
         }
@@ -210,27 +216,6 @@ private:
         g.fillRect (x, y + 18, 5, 2);
         g.fillRect (x + 7, y + 18, 5, 2);
         g.drawText ("REFERENCE", x + 20, y + 14, 70, 10, juce::Justification::centredLeft);
-    }
-
-    // Mockup-shaped placeholder: kick fundamental around 55 Hz, body dip,
-    // gentle HF rolloff with ripples. Deterministic, gently animated.
-    float placeholderDb (float hz, float t) const
-    {
-        const float logF   = std::log10 (hz);
-        const float kick   = 26.0f * std::exp (-juce::square ((logF - 1.74f) / 0.16f));
-        const float body   = 8.0f  * std::exp (-juce::square ((logF - 2.45f) / 0.30f));
-        const float rolloff= -13.0f * (logF - 1.7f);
-        const float ripple = 3.2f * std::sin (7.0f * logF + t * 1.7f)
-                           + 2.0f * std::sin (13.0f * logF - t * 1.1f);
-        return juce::jlimit (-60.0f, 10.0f, -34.0f + kick + body + rolloff + ripple);
-    }
-
-    static float referenceDb (float hz)
-    {
-        const float logF = std::log10 (hz);
-        return juce::jlimit (-60.0f, 12.0f,
-                             -12.0f - 6.5f * (logF - 1.3f)
-                               + 4.0f * std::exp (-juce::square ((logF - 1.8f) / 0.25f)));
     }
 
     void timerCallback() override
@@ -263,10 +248,9 @@ private:
         }
         else if (juce::Time::getMillisecondCounter() - lastAudioTime > 600)
         {
-            // Idle: animate the milestone's deterministic test data.
-            const float t = (float) (juce::Time::getMillisecondCounter() % 100000) / 1000.0f;
-            for (int i = 0; i < numBins; ++i)
-                displayDb[(size_t) i] = placeholderDb (binHz (i), t);
+            // Audio stopped: sink the trace to the floor (the release
+            // ballistics below make it a fall, not a cut).
+            displayDb.fill (-60.0f);
         }
 
         // Display ballistics: fast up, slow down.

@@ -69,6 +69,13 @@ SourceGloProcessor::SourceGloProcessor()
     fftBuffer.resize ((size_t) fftFifo.getTotalSize());
 }
 
+SourceGloProcessor::~SourceGloProcessor()
+{
+    // A worker job captures a WeakReference, but the pool itself must not
+    // outlive the object whose member it is.
+    analysisPool.removeAllJobs (true, 2000);
+}
+
 bool SourceGloProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const
 {
     const auto in  = layouts.getMainInputChannelSet();
@@ -86,6 +93,8 @@ void SourceGloProcessor::prepareToPlay (double sampleRate, int)
     bypassMix.reset (sampleRate, 0.05);        // click-free power button
 
     fftFifo.reset();
+    capture.prepare (sampleRate);
+    liveTruePeak.reset();
 }
 
 void SourceGloProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer&)
@@ -132,6 +141,20 @@ void SourceGloProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::M
     {
         inPeak[ch].store (buffer.getMagnitude (ch, 0, numSamples));
         inRms[ch].store (buffer.getRMSLevel (ch, 0, numSamples));
+    }
+
+    // Rolling capture + live true peak of the source (post-trim).
+    {
+        const float* l = buffer.getReadPointer (0);
+        const float* r = numCh > 1 ? buffer.getReadPointer (1) : l;
+        capture.push (l, r, numSamples);
+
+        const float tp = liveTruePeak.processBlock (l, r, numSamples);
+        float expected = truePeakLinear.load (std::memory_order_relaxed);
+        while (tp > expected
+                && ! truePeakLinear.compare_exchange_weak (expected, tp,
+                                                           std::memory_order_relaxed))
+            {}
     }
 
     {
@@ -183,27 +206,89 @@ bool SourceGloProcessor::pullFFTBlock (float* dest)
 }
 
 // -----------------------------------------------------------------------------
-//  Commands (UI milestone: placeholder behaviour, real engine later)
+//  Commands
 // -----------------------------------------------------------------------------
+void SourceGloProcessor::publishResult (const AnalysisResult& result)
+{
+    // Message thread only.
+    analysis.analyzed = result.enoughAudio;
+
+    if (result.enoughAudio)
+    {
+        analysis.score = result.score;
+        analysis.tone  = result.tone;
+        analysis.punch = result.punch;
+        analysis.level = result.level;
+        analysis.phase = result.phase;
+        analysis.fit   = result.fit;
+
+        analysis.stats.durationSec = result.durationSeconds;
+        analysis.stats.tempoBpm    = result.tempoBpm;
+        analysis.stats.key         = result.keyName;
+
+        for (int b = 0; b < AnalysisResult::numBands; ++b)
+        {
+            analysis.bandFit[b]     = result.bandFit[b];
+            analysis.radarSource[b] = result.radarSource[b];
+            analysis.radarTarget[b] = result.radarTarget[b];
+        }
+
+        analysis.conflictLoHz  = result.conflictLoHz;
+        analysis.conflictHiHz  = result.conflictHiHz;
+        analysis.conflictLabel = result.conflictLabel;
+    }
+
+    analysis.diagnostics = result.diagnostics;
+    analyzing.store (false);
+    analysisChanged.sendChangeMessage();
+}
+
 void SourceGloProcessor::requestAnalyze()
 {
-    // Placeholder analysis pass: flags the busy state, then publishes the
-    // model. Runs on the message thread via a timer-free async call.
-    analyzing.store (true);
-    juce::MessageManager::callAsync ([safe = juce::WeakReference<SourceGloProcessor> (this)]
+    if (analyzing.exchange (true))
+        return;                                    // one pass at a time
+
+    // Snapshot on the calling (message) thread, crunch on the pool, publish
+    // back on the message thread. The WeakReference guards against the
+    // processor being destroyed while the job runs.
+    auto snapshot = std::make_shared<juce::AudioBuffer<float>>();
+    const int captured = capture.snapshot (*snapshot);
+    const double sr = capture.sampleRate();
+    const int type = (int) apvts.getRawParameterValue (pid::sourceType)->load();
+    juce::ignoreUnused (captured);
+
+    analysisPool.addJob ([safe = juce::WeakReference<SourceGloProcessor> (this),
+                          snapshot, sr, type]
     {
-        if (auto* p = safe.get())
+        const auto result = AnalysisEngine::analyse (*snapshot, sr, type);
+        juce::MessageManager::callAsync ([safe, result]
         {
-            p->analyzing.store (false);
-            p->analysisChanged.sendChangeMessage();
-        }
+            if (auto* p = safe.get())
+                p->publishResult (result);
+        });
     });
+}
+
+void SourceGloProcessor::analyzeNow()
+{
+    juce::AudioBuffer<float> snapshot;
+    capture.snapshot (snapshot);
+    const int type = (int) apvts.getRawParameterValue (pid::sourceType)->load();
+    publishResult (AnalysisEngine::analyse (snapshot, capture.sampleRate(), type));
 }
 
 void SourceGloProcessor::requestFixSource()
 {
-    // Real fix engine lands with the DSP milestone.
-    analysisChanged.sendChangeMessage();
+    // Real fix engine lands with the next milestone; refresh the analysis so
+    // the button at least does something honest.
+    if (analysis.analyzed)
+        requestAnalyze();
+}
+
+float SourceGloProcessor::truePeakSinceDb()
+{
+    const float linear = truePeakLinear.exchange (0.0f);
+    return juce::Decibels::gainToDecibels (linear, -120.0f);
 }
 
 // -----------------------------------------------------------------------------

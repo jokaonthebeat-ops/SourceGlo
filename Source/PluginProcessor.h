@@ -12,6 +12,9 @@
 #pragma once
 #include <JuceHeader.h>
 #include "AnalysisModel.h"
+#include "dsp/CaptureRing.h"
+#include "dsp/TruePeakMeter.h"
+#include "dsp/AnalysisEngine.h"
 
 namespace sourceglo
 {
@@ -41,7 +44,7 @@ class SourceGloProcessor : public juce::AudioProcessor
 {
 public:
     SourceGloProcessor();
-    ~SourceGloProcessor() override = default;
+    ~SourceGloProcessor() override;
 
     // --- AudioProcessor --------------------------------------------------
     void prepareToPlay (double sampleRate, int samplesPerBlock) override;
@@ -86,9 +89,16 @@ public:
     juce::ChangeBroadcaster analysisChanged;
 
     // Command-style actions (master prompt: callbacks, not parameters).
+    // requestAnalyze snapshots the capture ring and runs the engine on a
+    // worker thread; analyzeNow runs it synchronously (tests, headless tools).
     void requestAnalyze();
+    void analyzeNow();
     void requestFixSource();
     bool isAnalyzing() const                               { return analyzing.load(); }
+
+    // Live running measurements for the source-stats readout. truePeakSinceDb
+    // returns the maximum true peak since the previous call (UI applies hold).
+    float truePeakSinceDb();
 
     // --- meters + spectrum feed ------------------------------------------
     // Block peak / rms per channel, written on the audio thread, read by the
@@ -115,6 +125,14 @@ private:
 
     juce::AbstractFifo fftFifo { fftSize * 4 };
     std::vector<float> fftBuffer;
+
+    void publishResult (const AnalysisResult& result);
+
+    CaptureRing capture;
+    TruePeakMeter liveTruePeak;
+    std::atomic<float> truePeakLinear { 0.0f };
+
+    juce::ThreadPool analysisPool { 1 };
 
     AnalysisModel analysis;
     std::atomic<bool> analyzing { false };

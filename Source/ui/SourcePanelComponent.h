@@ -11,7 +11,8 @@
 namespace sourceglo
 {
 
-class SourcePanelComponent : public juce::Component, private juce::Timer
+class SourcePanelComponent : public juce::Component, private juce::Timer,
+                             private juce::ChangeListener
 {
 public:
     explicit SourcePanelComponent (SourceGloProcessor& p) : processor (p)
@@ -58,7 +59,13 @@ public:
         inputTrim.onValueChange  = [this] { repaint (trimValueArea (true)); };
         outputTrim.onValueChange = [this] { repaint (trimValueArea (false)); };
 
+        processor.analysisChanged.addChangeListener (this);
         startTimerHz (30);   // meters; stats repaint every 3rd tick (10 Hz)
+    }
+
+    ~SourcePanelComponent() override
+    {
+        processor.analysisChanged.removeChangeListener (this);
     }
 
     void resized() override
@@ -108,13 +115,25 @@ public:
         g.drawText (formatDb ((float) outputTrim.getValue()), trimValueArea (false),
                     juce::Justification::centredLeft);
 
-        // Stats
-        const auto& s = processor.getAnalysis().stats;
-        const std::pair<const char*, const juce::String*> rows[] = {
-            { "Peak",         &s.peak },     { "RMS",      &s.rms },
-            { "Crest Factor", &s.crest },    { "True Peak",&s.truePeak },
-            { "Duration",     &s.duration }, { "Tempo",    &s.tempo },
-            { "Key",          &s.key },
+        // Stats: peak/RMS/crest/true-peak run live from the processor's
+        // meters (with hold); duration/tempo/key come from the last analysis.
+        const auto& model = processor.getAnalysis();
+        auto dbText = [] (float db, const char* unit) -> juce::String
+        {
+            if (db <= -90.0f) return juce::String (juce::CharPointer_UTF8 ("\xe2\x80\x93"));
+            return juce::String (db, 1) + " " + unit;
+        };
+        const juce::String dash (juce::CharPointer_UTF8 ("\xe2\x80\x93"));
+
+        const std::pair<const char*, juce::String> rows[] = {
+            { "Peak",         dbText (holdPeakDb, "dBFS") },
+            { "RMS",          dbText (holdRmsDb, "dBFS") },
+            { "Crest Factor", holdPeakDb > -90.0f ? juce::String (holdPeakDb - holdRmsDb, 1) + " dB" : dash },
+            { "True Peak",    dbText (holdTruePeakDb, "dBTP") },
+            { "Duration",     model.analyzed ? juce::String (model.stats.durationSec, 2) + " s" : dash },
+            { "Tempo",        model.analyzed && model.stats.tempoBpm > 0.0f
+                                ? juce::String (model.stats.tempoBpm, 1) + " BPM" : dash },
+            { "Key",          model.analyzed && model.stats.key.isNotEmpty() ? model.stats.key : dash },
         };
 
         int y = 481;
@@ -125,7 +144,7 @@ public:
             g.drawText (row.first, 28, y, 110, 16, juce::Justification::centredLeft);
             g.setFont (Fonts::bodyValue());
             g.setColour (tokens::white);
-            g.drawText (*row.second, 110, y, 105, 16, juce::Justification::centredRight);
+            g.drawText (row.second, 110, y, 105, 16, juce::Justification::centredRight);
             y += 25;
         }
     }
@@ -169,8 +188,26 @@ private:
         if (++statsTick >= 3)
         {
             statsTick = 0;
+
+            // Live stat hold: capture the loudest recent values, decay slowly
+            // so the readout is legible rather than flickering per block.
+            const float peakNow = juce::Decibels::gainToDecibels (
+                juce::jmax (processor.inPeak[0].load(), processor.inPeak[1].load()), -120.0f);
+            const float rmsNow = juce::Decibels::gainToDecibels (
+                0.5f * (processor.inRms[0].load() + processor.inRms[1].load()), -120.0f);
+            const float tpNow = processor.truePeakSinceDb();
+
+            holdPeakDb     = juce::jmax (holdPeakDb - 0.8f, peakNow);
+            holdRmsDb      = juce::jmax (holdRmsDb - 0.8f, rmsNow);
+            holdTruePeakDb = juce::jmax (holdTruePeakDb - 0.8f, tpNow);
+
             repaint (14, 455, 215, 210);   // stats block only
         }
+    }
+
+    void changeListenerCallback (juce::ChangeBroadcaster*) override
+    {
+        repaint (14, 455, 215, 210);
     }
 
     SourceGloProcessor& processor;
@@ -191,6 +228,7 @@ private:
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> invAttachment, monoAttachment;
 
     int statsTick = 0;
+    float holdPeakDb = -120.0f, holdRmsDb = -120.0f, holdTruePeakDb = -120.0f;
 };
 
 } // namespace sourceglo

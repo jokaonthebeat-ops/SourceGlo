@@ -10,7 +10,8 @@
 namespace sourceglo
 {
 
-class MaskingFitComponent : public juce::Component, private juce::Timer
+class MaskingFitComponent : public juce::Component, private juce::Timer,
+                            private juce::ChangeListener
 {
 public:
     explicit MaskingFitComponent (SourceGloProcessor& p) : processor (p)
@@ -25,7 +26,13 @@ public:
         addAndMakeVisible (overlayButton);
         addAndMakeVisible (deltaButton);
 
+        processor.analysisChanged.addChangeListener (this);
         startTimerHz (15);
+    }
+
+    ~MaskingFitComponent() override
+    {
+        processor.analysisChanged.removeChangeListener (this);
     }
 
     void resized() override
@@ -102,8 +109,9 @@ private:
             g.fillPath (dashed);
         }
 
-        // Source polygon: cyan fill + line, with a gentle idle breathing so
-        // the radar animates from test data at this milestone.
+        // Source polygon: only once something has been analysed. Gentle
+        // breathing keeps the display alive between analyses.
+        if (processor.getAnalysis().analyzed)
         {
             juce::Path source;
             for (int i = 0; i <= 5; ++i)
@@ -127,8 +135,10 @@ private:
         g.drawText ("FIT SCORE", 240, 66, 90, 14, juce::Justification::centredLeft);
 
         g.setFont (Fonts::make (34.0f, false, true));
-        g.setColour (tokens::cyan);
-        g.drawText (juce::String (model.fit), 240, 82, 52, 34, juce::Justification::centredLeft);
+        g.setColour (model.analyzed ? tokens::cyan : tokens::muted);
+        g.drawText (model.analyzed ? juce::String (model.fit)
+                                   : juce::String (juce::CharPointer_UTF8 ("\xe2\x80\x93\xe2\x80\x93")),
+                    240, 82, 52, 34, juce::Justification::centredLeft);
 
         g.setFont (Fonts::make (11.0f));
         g.setColour (tokens::muted);
@@ -148,14 +158,18 @@ private:
             const juce::Rectangle<float> track (278.0f, (float) y + 2.0f, 42.0f, 6.0f);
             g.setColour (tokens::bg1);
             g.fillRoundedRectangle (track, 2.0f);
-            g.setColour (tokens::cyanMid);
-            g.fillRoundedRectangle (track.withWidth (track.getWidth()
-                                       * (float) model.bandFit[i] / 100.0f), 2.0f);
+            if (model.analyzed)
+            {
+                g.setColour (tokens::cyanMid);
+                g.fillRoundedRectangle (track.withWidth (track.getWidth()
+                                           * (float) model.bandFit[i] / 100.0f), 2.0f);
+            }
 
             g.setFont (Fonts::make (10.0f, true));
             g.setColour (tokens::text);
-            g.drawText (juce::String (model.bandFit[i]), 322, y - 1, 16, 12,
-                        juce::Justification::centredRight);
+            g.drawText (model.analyzed ? juce::String (model.bandFit[i])
+                                       : juce::String (juce::CharPointer_UTF8 ("\xe2\x80\x93")),
+                        322, y - 1, 16, 12, juce::Justification::centredRight);
         }
     }
 
@@ -181,6 +195,8 @@ private:
         breathe = std::sin ((float) (juce::Time::getMillisecondCounter() % 6283) / 1000.0f);
         repaint (20, 45, 215, 220);   // radar area only
     }
+
+    void changeListenerCallback (juce::ChangeBroadcaster*) override  { repaint(); }
 
     SourceGloProcessor& processor;
     SmallPill overlayButton { "Overlay view", "Overlay" };

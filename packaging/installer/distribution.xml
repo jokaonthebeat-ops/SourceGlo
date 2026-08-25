@@ -45,8 +45,8 @@
         <pkg-ref id="com.diamondloopz.sourceglopro.app"/>
     </choice>
 
-    <pkg-ref id="com.diamondloopz.sourceglopro.vst3" version="0.9.0" onConclusion="none">SourceGloPro-VST3.pkg</pkg-ref>
-    <pkg-ref id="com.diamondloopz.sourceglopro.au"   version="0.9.0" onConclusion="none">SourceGloPro-AU.pkg</pkg-ref>
-    <pkg-ref id="com.diamondloopz.sourceglopro.app"  version="0.9.0" onConclusion="none">SourceGloPro-App.pkg</pkg-ref>
+    <pkg-ref id="com.diamondloopz.sourceglopro.vst3" version="0.9.1" onConclusion="none">SourceGloPro-VST3.pkg</pkg-ref>
+    <pkg-ref id="com.diamondloopz.sourceglopro.au"   version="0.9.1" onConclusion="none">SourceGloPro-AU.pkg</pkg-ref>
+    <pkg-ref id="com.diamondloopz.sourceglopro.app"  version="0.9.1" onConclusion="none">SourceGloPro-App.pkg</pkg-ref>
 
 </installer-gui-script>
