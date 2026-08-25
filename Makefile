@@ -24,7 +24,7 @@
 # =============================================================================
 
 PROJECT      := SourceGloPro
-VERSION      := 0.9.3
+VERSION      := 0.9.4
 JUCE_DIR     := /Users/jokabeatz/Documents/JUCE
 JUCE_MODULES := $(JUCE_DIR)/modules
 VST3_SDK     := $(JUCE_MODULES)/juce_audio_processors_headless/format_types/VST3_SDK

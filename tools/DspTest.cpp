@@ -102,6 +102,7 @@ int main()
     testRoot.deleteRecursively();
     testRoot.createDirectory();
     RescueLibrary::indexFileOverride() = testRoot.getChildFile ("LibraryIndex.json");
+    PresetBank::userDirOverride() = testRoot.getChildFile ("UserPresets");
 
     // ---------------------------------------------------------------- assets
     std::printf ("- artwork\n");
@@ -966,6 +967,99 @@ int main()
         }
     }
 
+    // ---------------------------------------------------------------- presets
+    std::printf ("- preset bank\n");
+    {
+        SourceGloProcessor p;
+        auto& bank = p.getPresets();
+
+        check (bank.getNumPresets() == 29, "29 factory presets (got "
+                                             + juce::String (bank.getNumPresets()) + ")");
+        check (bank.getCurrentName() == "Punchy Kick Starter",
+               "fresh instance opens on Punchy Kick Starter (got '"
+                 + bank.getCurrentName() + "')");
+        check (! bank.isModified(), "fresh instance starts clean");
+        checkNear ((double) p.getAPVTS().getRawParameterValue (pid::sourceType)->load(),
+                   1.0, 0.01, "fresh instance source type is Kick");
+
+        // Every factory value sits inside its parameter's range.
+        for (int i = 0; i < bank.getNumPresets(); ++i)
+            for (const auto& [id, value] : bank.getPreset (i).values)
+            {
+                auto* param = dynamic_cast<juce::RangedAudioParameter*> (
+                                  p.getAPVTS().getParameter (id));
+                check (param != nullptr
+                        && value >= param->getNormalisableRange().start - 1e-4f
+                        && value <= param->getNormalisableRange().end + 1e-4f,
+                       bank.getPreset (i).name + " " + id + " in range");
+            }
+
+        // Loading applies values; excluded params stay put.
+        setParam (p, pid::inputGain, -5.0f);
+        int deep808 = -1;
+        for (int i = 0; i < bank.getNumPresets(); ++i)
+            if (bank.getPreset (i).name == "Deep 808 Control")
+                deep808 = i;
+        check (deep808 >= 0, "Deep 808 Control exists");
+        bank.load (deep808);
+        checkNear ((double) p.getAPVTS().getRawParameterValue (pid::sourceType)->load(),
+                   4.0, 0.01, "preset sets source type 808");
+        checkNear ((double) p.getAPVTS().getRawParameterValue (pid::body)->load(),
+                   70.0, 0.1, "preset sets Body 70");
+        checkNear ((double) p.getAPVTS().getRawParameterValue (pid::inputGain)->load(),
+                   -5.0, 0.01, "preset load leaves the input trim alone");
+        check (! bank.isModified(), "freshly loaded preset is clean");
+
+        // Modified tracking by snapshot.
+        setParam (p, pid::punch, 90.0f);
+        check (bank.isModified(), "tweaking a macro marks the preset modified");
+        bank.load (deep808);
+        check (! bank.isModified(), "reloading clears the modified flag");
+
+        // Undoable loads.
+        bank.load (0);
+        check (bank.getCurrentName() == "Punchy Kick Starter", "loaded preset 0");
+        check (p.getUndoManager().canUndo(), "preset load is undoable");
+        p.getUndoManager().undo();
+        check (bank.getCurrentName() == "Deep 808 Control",
+               "undo returns to the previous preset (got '" + bank.getCurrentName() + "')");
+        checkNear ((double) p.getAPVTS().getRawParameterValue (pid::body)->load(),
+                   70.0, 0.1, "undo restores the previous values");
+
+        // Prev/next wrap.
+        bank.load (bank.getNumPresets() - 1);
+        bank.step (1);
+        check (bank.getCurrentIndex() == 0, "next wraps to the first preset");
+        bank.step (-1);
+        check (bank.getCurrentIndex() == bank.getNumPresets() - 1,
+               "previous wraps to the last preset");
+
+        // User presets: save, then a new instance sees and loads it.
+        setParam (p, pid::punch, 77.0f);
+        setParam (p, pid::saturate, 61.0f);
+        check (bank.saveUserPreset ("My Test Kick"), "user preset saves");
+        check (bank.getCurrentName() == "My Test Kick", "saved preset becomes current");
+        check (! bank.isModified(), "saved preset is clean");
+        check (! bank.currentIsFactory(), "saved preset is a user preset");
+    }
+    {
+        SourceGloProcessor p2;
+        auto& bank2 = p2.getPresets();
+        int mine = -1;
+        for (int i = 0; i < bank2.getNumPresets(); ++i)
+            if (bank2.getPreset (i).name == "My Test Kick")
+                mine = i;
+        check (mine >= 0, "user preset appears in a new instance");
+        if (mine >= 0)
+        {
+            bank2.load (mine);
+            checkNear ((double) p2.getAPVTS().getRawParameterValue (pid::punch)->load(),
+                       77.0, 0.1, "user preset round-trips Punch");
+            checkNear ((double) p2.getAPVTS().getRawParameterValue (pid::saturate)->load(),
+                       61.0, 0.1, "user preset round-trips Saturate");
+        }
+    }
+
     // ------------------------------------------------------------------ state
     std::printf ("- state round-trip\n");
     {
@@ -973,7 +1067,11 @@ int main()
         setParam (a, pid::punch, 83.0f);
         setParam (a, pid::sourceType, 4.0f);
         a.setSavedUIScale (1.25f);
-        a.selectPreset (2);
+        a.getPresets().load (2);
+        // Re-stage the values the assertions check - the preset load above
+        // rewrote the creative parameters.
+        setParam (a, pid::punch, 83.0f);
+        setParam (a, pid::sourceType, 4.0f);
 
         juce::MemoryBlock blob;
         a.getStateInformation (blob);
@@ -986,7 +1084,8 @@ int main()
         checkNear ((double) b.getAPVTS().getRawParameterValue (pid::sourceType)->load(), 4.0, 0.01,
                    "source type survives round-trip");
         checkNear ((double) b.getSavedUIScale(), 1.25, 0.001, "UI scale survives round-trip");
-        check (b.getPresetIndex() == 2, "preset index survives round-trip");
+        check (b.getPresets().getCurrentName() == a.getPresets().getCurrentName(),
+               "preset name survives round-trip (got '" + b.getPresets().getCurrentName() + "')");
     }
 
     // ----------------------------------------------------------------- editor

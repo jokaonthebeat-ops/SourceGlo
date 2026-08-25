@@ -17,6 +17,7 @@
 #include "dsp/FixChain.h"
 #include "library/RescueLibrary.h"
 #include "library/PreviewPlayer.h"
+#include "presets/PresetBank.h"
 #include "dsp/AnalysisEngine.h"
 
 namespace sourceglo
@@ -78,11 +79,7 @@ public:
     juce::AudioProcessorValueTreeState& getAPVTS()         { return apvts; }
     juce::UndoManager& getUndoManager()                    { return undoManager; }
 
-    // Preset display state (placeholder browser for the UI milestone).
-    juce::StringArray getPresetNames() const;
-    int getPresetIndex() const                             { return presetIndex; }
-    void selectPreset (int index);
-    juce::String getPresetName() const;
+    PresetBank& getPresets()                               { return *presetBank; }
 
     // UI scale persisted with the session.
     float getSavedUIScale() const                          { return uiScale.load(); }
@@ -168,7 +165,7 @@ private:
     AnalysisModel analysis;
     std::atomic<bool> analyzing { false };
 
-    int presetIndex = 0;
+    std::unique_ptr<PresetBank> presetBank;    // after the APVTS
     std::atomic<float> uiScale { 1.0f };
 
     JUCE_DECLARE_WEAK_REFERENCEABLE (SourceGloProcessor)

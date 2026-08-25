@@ -11,12 +11,14 @@
 namespace sourceglo
 {
 
-class HeaderComponent : public juce::Component
+class HeaderComponent : public juce::Component,
+                        private juce::ChangeListener
 {
 public:
     explicit HeaderComponent (SourceGloProcessor& p) : processor (p)
     {
         setTitle ("Header");
+        processor.getPresets().changed.addChangeListener (this);
 
         auto initIcon = [this] (IconButton& b, const juce::String& tip)
         {
@@ -32,8 +34,8 @@ public:
         nextButton.setIconPadding (12.0f);
         addAndMakeVisible (prevButton);
         addAndMakeVisible (nextButton);
-        prevButton.onClick = [this] { processor.selectPreset (processor.getPresetIndex() - 1); repaint(); };
-        nextButton.onClick = [this] { processor.selectPreset (processor.getPresetIndex() + 1); repaint(); };
+        prevButton.onClick = [this] { processor.getPresets().step (-1); };
+        nextButton.onClick = [this] { processor.getPresets().step (1); };
 
         saveButton.setLeftAligned (true);
         saveAsButton.setLeftAligned (true);
@@ -49,6 +51,14 @@ public:
 
         undoButton.onClick = [this] { processor.getUndoManager().undo(); };
         redoButton.onClick = [this] { processor.getUndoManager().redo(); };
+        saveButton.onClick = [this]
+        {
+            auto& bank = processor.getPresets();
+            if (! bank.currentIsFactory() && bank.overwriteCurrent())
+                return;
+            promptSaveAs();                     // factory presets save as new
+        };
+        saveAsButton.onClick = [this] { promptSaveAs(); };
 
         settingsButton.onClick = [this] { showSettingsMenu(); };
         helpButton.onClick = [this] { showAbout(); };
@@ -62,6 +72,17 @@ public:
         };
 
         onScalePreset = [] (float) {};
+    }
+
+    ~HeaderComponent() override
+    {
+        processor.getPresets().changed.removeChangeListener (this);
+    }
+
+    void mouseDown (const juce::MouseEvent& e) override
+    {
+        if (juce::Rectangle<int> (784, 14, 222, 40).contains (e.getPosition()))
+            showPresetMenu();
     }
 
     std::function<void (float)> onScalePreset;   // wired by the editor
@@ -100,9 +121,11 @@ public:
         g.fillRoundedRectangle (box, 6.0f);
         g.setColour (tokens::stroke);
         g.drawRoundedRectangle (box.reduced (0.5f), 6.0f, 1.0f);
+        auto& bank = processor.getPresets();
         g.setColour (tokens::white);
         g.setFont (Fonts::bodyValue().withHeight (15.0f));
-        g.drawText (processor.getPresetName(), box.toNearestInt(), juce::Justification::centred);
+        g.drawText (bank.getCurrentName() + (bank.isModified() ? " *" : ""),
+                    box.toNearestInt(), juce::Justification::centred);
 
         // SAVE / SAVE AS get text beside their icons.
         drawIconLabel (g, saveButton,   "SAVE");
@@ -128,6 +151,59 @@ private:
         auto r = b.getBounds();
         g.drawText (text, r.getX() + 26, r.getY(), r.getWidth() - 26, r.getHeight(),
                     juce::Justification::centredLeft);
+    }
+
+    void showPresetMenu()
+    {
+        auto& bank = processor.getPresets();
+        juce::PopupMenu menu;
+        menu.setLookAndFeel (&getLookAndFeel());
+
+        juce::String lastCategory;
+        for (int i = 0; i < bank.getNumPresets(); ++i)
+        {
+            const auto& preset = bank.getPreset (i);
+            if (preset.category != lastCategory)
+            {
+                lastCategory = preset.category;
+                menu.addSectionHeader (lastCategory.toUpperCase());
+            }
+            menu.addItem (i + 1, preset.name, true, i == bank.getCurrentIndex());
+        }
+
+        menu.showMenuAsync (juce::PopupMenu::Options()
+                              .withTargetScreenArea (localAreaToGlobal (
+                                  juce::Rectangle<int> (784, 14, 222, 40))),
+                            [safe = juce::Component::SafePointer<HeaderComponent> (this)] (int r)
+                            {
+                                if (safe != nullptr && r > 0)
+                                    safe->processor.getPresets().load (r - 1);
+                            });
+    }
+
+    void promptSaveAs()
+    {
+        auto* window = new juce::AlertWindow ("Save Preset",
+                                              "Name for this preset:",
+                                              juce::MessageBoxIconType::NoIcon);
+        window->addTextEditor ("name", processor.getPresets().getCurrentName());
+        window->addButton ("Save", 1, juce::KeyPress (juce::KeyPress::returnKey));
+        window->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
+
+        window->enterModalState (true,
+            juce::ModalCallbackFunction::create (
+                [safe = juce::Component::SafePointer<HeaderComponent> (this), window] (int r)
+                {
+                    if (safe != nullptr && r == 1)
+                        safe->processor.getPresets().saveUserPreset (
+                            window->getTextEditorContents ("name"));
+                }),
+            true);
+    }
+
+    void changeListenerCallback (juce::ChangeBroadcaster*) override
+    {
+        repaint();
     }
 
     void showSettingsMenu()

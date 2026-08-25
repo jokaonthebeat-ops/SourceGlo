@@ -71,6 +71,8 @@ SourceGloProcessor::SourceGloProcessor()
     previewFormats.registerBasicFormats();
     library.changed.addChangeListener (this);
 
+    presetBank = std::make_unique<PresetBank> (apvts, undoManager);
+
     // A previously indexed library fills the suggestions straight away.
     if (library.getIndexedCount() > 0)
         analysis.rescues = library.match (
@@ -402,32 +404,12 @@ float SourceGloProcessor::truePeakSinceDb()
 }
 
 // -----------------------------------------------------------------------------
-//  Presets (placeholder list so the header responds; real bank comes later)
-// -----------------------------------------------------------------------------
-juce::StringArray SourceGloProcessor::getPresetNames() const
-{
-    return { "Punchy Kick Starter", "Deep 808 Control", "Snare Snap Doctor",
-             "Bass Focus Clean", "Vocal Clarity Rescue", "Loop Glue Fast" };
-}
-
-void SourceGloProcessor::selectPreset (int index)
-{
-    const auto names = getPresetNames();
-    presetIndex = (index % names.size() + names.size()) % names.size();
-}
-
-juce::String SourceGloProcessor::getPresetName() const
-{
-    return getPresetNames()[presetIndex];
-}
-
-// -----------------------------------------------------------------------------
 //  State
 // -----------------------------------------------------------------------------
 void SourceGloProcessor::getStateInformation (juce::MemoryBlock& destData)
 {
     auto state = apvts.copyState();
-    state.setProperty ("presetIndex", presetIndex, nullptr);
+    state.setProperty ("presetName", presetBank->getCurrentName(), nullptr);
     state.setProperty ("uiScale", uiScale.load(), nullptr);
 
     const auto fix = fixChain.getFixState();
@@ -451,7 +433,6 @@ void SourceGloProcessor::setStateInformation (const void* data, int sizeInBytes)
         if (xml->hasTagName (apvts.state.getType()))
         {
             auto state = juce::ValueTree::fromXml (*xml);
-            presetIndex = (int) state.getProperty ("presetIndex", 0);
             uiScale.store ((float) (double) state.getProperty ("uiScale", 1.0));
 
             FixChain::FixState fix;
@@ -465,6 +446,7 @@ void SourceGloProcessor::setStateInformation (const void* data, int sizeInBytes)
             fixChain.setFixState (fix, (bool) state.getProperty ("fixEngaged", false));
 
             apvts.replaceState (state);
+            presetBank->notePresetRestored (state.getProperty ("presetName", "").toString());
         }
     }
 }
