@@ -61,6 +61,10 @@ struct AnalysisEngine
 
     // Band edges shared by the analyser and the UI.
     static const float* bandEdgesHz();   // 6 edges for 5 bands
+
+    // The source-type profile's target level for one band (dB re loudest) -
+    // the rescue matcher ranks library files against this.
+    static float targetBandDb (int sourceTypeIndex, int band);
 };
 
 } // namespace sourceglo

@@ -11,6 +11,7 @@
 #include "Widgets.h"
 #include "SpectrumAnalyzerComponent.h"
 #include "MaskingFitComponent.h"
+#include "LibraryViewComponent.h"
 
 namespace sourceglo
 {
@@ -19,11 +20,22 @@ class AnalysisTabsComponent : public juce::Component
 {
 public:
     explicit AnalysisTabsComponent (SourceGloProcessor& p)
-        : spectrum (p), maskingFit (p)
+        : spectrum (p), maskingFit (p), libraryView (p)
     {
         setTitle ("Analysis views");
         addAndMakeVisible (spectrum);
         addAndMakeVisible (maskingFit);
+        addChildComponent (libraryView);
+    }
+
+    void selectTab (int index)
+    {
+        index = juce::jlimit (0, numTabs - 1, index);
+        if (index == activeTab)
+            return;
+        activeTab = index;
+        applyTabVisibility();
+        repaint();
     }
 
     void resized() override
@@ -59,8 +71,8 @@ public:
             g.drawText (tabNames[i], r, juce::Justification::centred);
         }
 
-        // --- non-Analyze tabs: placeholder view in the content region.
-        if (activeTab != 0)
+        // --- FIT / RESCUE / DETAIL: placeholder view in the content region.
+        if (activeTab != 0 && activeTab != 4)
         {
             const juce::Rectangle<int> content (9, 46, 742, 263);
 
@@ -101,14 +113,8 @@ public:
     void mouseDown (const juce::MouseEvent& e) override
     {
         const int idx = tabIndexAt (e.getPosition());
-        if (idx >= 0 && idx != activeTab)
-        {
-            activeTab = idx;
-            const bool analyze = activeTab == 0;
-            spectrum.setVisible (analyze);
-            maskingFit.setVisible (analyze);
-            repaint();
-        }
+        if (idx >= 0)
+            selectTab (idx);
     }
 
 private:
@@ -130,8 +136,16 @@ private:
         return -1;
     }
 
+    void applyTabVisibility()
+    {
+        spectrum.setVisible (activeTab == 0);
+        maskingFit.setVisible (activeTab == 0);
+        libraryView.setVisible (activeTab == 4);
+    }
+
     SpectrumAnalyzerComponent spectrum;
     MaskingFitComponent maskingFit;
+    LibraryViewComponent libraryView;
 
     int activeTab = 0, hoverTab = -1;
 };

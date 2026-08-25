@@ -1,9 +1,10 @@
 /*
-    RescueSuggestionsComponent - five recommendation rows on the supplied row
-    art, Auto Match toggle and the Browse Library action.
+    RescueSuggestionsComponent - live suggestions from the user's own sample
+    library, ranked by fit against the selected source type. Rows preview
+    through the plugin output, drag out into the host as real files, and
+    star into persistent favourites.
     Bounds: layout::rescuePanel {1017,528,464,441}; coordinates are local.
-    List rows: layout::rescueList {1034,580,388,274} -> local x 17, y 52,
-    row height 48, pitch 56.5.
+    Rows: mockup-measured x 53, y 72, pitch 57.5.
 */
 
 #pragma once
@@ -13,18 +14,20 @@
 namespace sourceglo
 {
 
-class RescueSuggestionsComponent : public juce::Component
+class RescueSuggestionsComponent : public juce::Component,
+                                   private juce::ChangeListener,
+                                   private juce::Timer
 {
 public:
     explicit RescueSuggestionsComponent (SourceGloProcessor& p) : processor (p)
     {
         setTitle ("Rescue suggestions");
 
-        helpButton.setTooltip ("Suggestions ranked by fit against the current source");
+        helpButton.setTooltip ("Suggestions from your library, ranked by fit for the source type");
         helpButton.setIconPadding (2.0f);
         addAndMakeVisible (helpButton);
 
-        autoMatchToggle.setTooltip ("Automatically refresh suggestions after analysis");
+        autoMatchToggle.setTooltip ("Refresh suggestions automatically after analysis and scans");
         addAndMakeVisible (autoMatchToggle);
         autoMatchAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (
             processor.getAPVTS(), pid::autoMatch, autoMatchToggle);
@@ -32,29 +35,55 @@ public:
         for (int i = 0; i < 5; ++i)
         {
             auto& play = playButtons[(size_t) i];
-            play = std::make_unique<IconButton> ("Preview " + rowName (i), "play",
+            play = std::make_unique<IconButton> ("Preview suggestion", "play",
                                                  tokens::text, tokens::cyan);
-            play->setTooltip ("Preview " + rowName (i));
             play->setCircled (true);
             play->setIconPadding (8.0f);
-            addAndMakeVisible (*play);
-            play->onClick = [this, i] { playingIndex = playingIndex == i ? -1 : i; repaint(); };
+            addChildComponent (*play);
+            play->onClick = [this, i]
+            {
+                const auto& rescues = processor.getAnalysis().rescues;
+                if (i < (int) rescues.size())
+                    processor.togglePreview (rescues[(size_t) i].path);
+            };
 
             auto& star = starButtons[(size_t) i];
-            star = std::make_unique<IconButton> ("Favourite " + rowName (i), "star",
+            star = std::make_unique<IconButton> ("Favourite", "star",
                                                  tokens::muted, tokens::gold);
-            star->setTooltip ("Favourite");
             star->setClickingTogglesState (true);
-            addAndMakeVisible (*star);
+            star->setTooltip ("Favourite");
+            addChildComponent (*star);
+            star->onClick = [this, i]
+            {
+                const auto& rescues = processor.getAnalysis().rescues;
+                if (i < (int) rescues.size())
+                    processor.getLibrary().setFavourite (rescues[(size_t) i].path,
+                                                         starButtons[(size_t) i]->getToggleState());
+            };
         }
 
-        browseButton.setTooltip ("Open the sample library browser");
+        browseButton.setTooltip ("Manage the sample library folders");
         browseButton.setIconTint (tokens::text);
         addAndMakeVisible (browseButton);
+        browseButton.onClick = [this] { if (onBrowseLibrary) onBrowseLibrary(); };
 
         moreButton.setTooltip ("Library options");
         addAndMakeVisible (moreButton);
+        moreButton.onClick = browseButton.onClick;
+
+        processor.analysisChanged.addChangeListener (this);
+        processor.getLibrary().changed.addChangeListener (this);
+        startTimerHz (5);          // preview auto-stop / play-state sync
+        syncRows();
     }
+
+    ~RescueSuggestionsComponent() override
+    {
+        processor.analysisChanged.removeChangeListener (this);
+        processor.getLibrary().changed.removeChangeListener (this);
+    }
+
+    std::function<void()> onBrowseLibrary;    // wired by the editor (Library tab)
 
     void resized() override
     {
@@ -74,7 +103,7 @@ public:
 
     void paint (juce::Graphics& g) override
     {
-        const auto& model = processor.getAnalysis();
+        const auto& rescues = processor.getAnalysis().rescues;
 
         g.setFont (Fonts::panelTitle().withHeight (15.0f));
         g.setColour (tokens::white);
@@ -84,8 +113,28 @@ public:
         g.setColour (tokens::muted);
         g.drawText ("AUTO MATCH", 330, 30, 76, 14, juce::Justification::centredRight);
 
-        for (int i = 0; i < (int) model.rescues.size() && i < 5; ++i)
-            drawRow (g, i, model.rescues[(size_t) i]);
+        for (int i = 0; i < (int) rescues.size() && i < 5; ++i)
+            drawRow (g, i, rescues[(size_t) i]);
+
+        if (rescues.empty())
+        {
+            auto& lib = processor.getLibrary();
+            g.setFont (Fonts::bodyLabel());
+            g.setColour (tokens::muted);
+            if (lib.getFolders().isEmpty())
+            {
+                g.drawText ("No sample folders yet.", 53, 200, 388, 16,
+                            juce::Justification::centred);
+                g.drawText ("Use Browse Library to add your packs.", 53, 220, 388, 16,
+                            juce::Justification::centred);
+            }
+            else if (lib.isScanning())
+                g.drawText ("Scanning your library" + juce::String (juce::CharPointer_UTF8 ("\xe2\x80\xa6")),
+                            53, 210, 388, 16, juce::Justification::centred);
+            else
+                g.drawText ("No matches yet - rescan or add more folders.",
+                            53, 210, 388, 16, juce::Justification::centred);
+        }
     }
 
     void mouseMove (const juce::MouseEvent& e) override
@@ -107,29 +156,59 @@ public:
             selectedIndex = idx;
             repaint();
         }
+        dragStarted = false;
+    }
+
+    void mouseDrag (const juce::MouseEvent& e) override
+    {
+        // Drag a suggestion straight into the host as a file.
+        if (dragStarted || e.getDistanceFromDragStart() < 10)
+            return;
+        const int idx = rowIndexAt (e.getMouseDownPosition());
+        const auto& rescues = processor.getAnalysis().rescues;
+        if (idx >= 0 && idx < (int) rescues.size()
+             && juce::File (rescues[(size_t) idx].path).existsAsFile())
+        {
+            dragStarted = true;
+            juce::DragAndDropContainer::performExternalDragDropOfFiles (
+                { rescues[(size_t) idx].path }, false);
+        }
     }
 
 private:
     juce::Rectangle<int> rowBounds (int i) const
     {
-        // Mockup-measured: rows at x 1070, tops 600 + 57.5 i (panel-local
-        // x 53, y 72) - the layout JSON's rescue_list sits ~35 px left and
-        // ~20 px high of where the reference actually draws the rows.
         return { 53, 72 + juce::roundToInt (57.5f * (float) i), 388, 48 };
     }
 
     int rowIndexAt (juce::Point<int> pos) const
     {
-        for (int i = 0; i < 5; ++i)
+        const int count = juce::jmin (5, (int) processor.getAnalysis().rescues.size());
+        for (int i = 0; i < count; ++i)
             if (rowBounds (i).contains (pos))
                 return i;
         return -1;
     }
 
-    juce::String rowName (int i) const
+    void syncRows()
     {
-        const auto& r = processor.getAnalysis().rescues;
-        return i < (int) r.size() ? r[(size_t) i].fileName : juce::String();
+        const auto& rescues = processor.getAnalysis().rescues;
+        const auto previewing = processor.getPreviewPath();
+
+        for (int i = 0; i < 5; ++i)
+        {
+            const bool present = i < (int) rescues.size();
+            playButtons[(size_t) i]->setVisible (present);
+            starButtons[(size_t) i]->setVisible (present);
+            if (present)
+            {
+                playButtons[(size_t) i]->setToggleState (
+                    previewing == rescues[(size_t) i].path, juce::dontSendNotification);
+                starButtons[(size_t) i]->setToggleState (
+                    rescues[(size_t) i].favourite, juce::dontSendNotification);
+            }
+        }
+        selectedIndex = juce::jmin (selectedIndex, (int) rescues.size() - 1);
     }
 
     void drawRow (juce::Graphics& g, int i, const RescueSuggestion& item)
@@ -151,8 +230,8 @@ private:
             }
         }
 
-        drawWaveform (g, { row.getX() + 58, row.getY() + 10, 50, 28 }, item.waveformSeed,
-                      i == playingIndex);
+        drawWaveform (g, { row.getX() + 58, row.getY() + 10, 50, 28 }, item,
+                      processor.getPreviewPath() == item.path);
 
         g.setFont (Fonts::rescueTitle());
         g.setColour (tokens::white);
@@ -177,22 +256,39 @@ private:
     }
 
     void drawWaveform (juce::Graphics& g, juce::Rectangle<int> r,
-                       juce::uint32 seed, bool playing)
+                       const RescueSuggestion& item, bool playing)
     {
-        juce::Random rng ((juce::int64) seed * 7919);
-        const int bars = 24;
+        const int bars = RescueSuggestion::waveformBars;
         const float barW = (float) r.getWidth() / (float) bars;
 
         g.setColour (playing ? tokens::cyan : tokens::cyanMid.withAlpha (0.75f));
         for (int b = 0; b < bars; ++b)
         {
-            // Percussive envelope: hot attack, decaying tail.
-            const float env = std::exp (-3.2f * (float) b / (float) bars);
-            const float amp = juce::jlimit (0.06f, 1.0f, env * (0.55f + rng.nextFloat() * 0.6f));
-            const float bh  = amp * (float) r.getHeight();
+            const float amp = juce::jlimit (0.05f, 1.0f, item.waveform[(size_t) b]);
+            const float bh = amp * (float) r.getHeight();
             g.fillRect ((float) r.getX() + (float) b * barW,
                         (float) r.getCentreY() - bh * 0.5f,
                         juce::jmax (1.0f, barW - 1.2f), bh);
+        }
+    }
+
+    void changeListenerCallback (juce::ChangeBroadcaster*) override
+    {
+        syncRows();
+        repaint();
+    }
+
+    void timerCallback() override
+    {
+        if (! isShowing() && ! headlessRefreshMode())
+            return;
+        // Preview can end on its own; keep the play buttons honest.
+        const auto previewing = processor.getPreviewPath();
+        if (previewing != lastPreview)
+        {
+            lastPreview = previewing;
+            syncRows();
+            repaint();
         }
     }
 
@@ -208,7 +304,9 @@ private:
                                "BROWSE LIBRARY", "folder" };
     IconButton moreButton { "Library options", "menu" };
 
-    int selectedIndex = 0, hoverIndex = -1, playingIndex = -1;
+    int selectedIndex = 0, hoverIndex = -1;
+    bool dragStarted = false;
+    juce::String lastPreview;
 };
 
 } // namespace sourceglo

@@ -96,6 +96,13 @@ int main()
     juce::ScopedJuceInitialiser_GUI juceInit;
     std::printf ("SourceGlo Pro test suite\n========================\n");
 
+    // Sandbox the library index so no test ever touches the user's real one.
+    auto testRoot = juce::File::getSpecialLocation (juce::File::tempDirectory)
+                      .getChildFile ("SourceGloTests");
+    testRoot.deleteRecursively();
+    testRoot.createDirectory();
+    RescueLibrary::indexFileOverride() = testRoot.getChildFile ("LibraryIndex.json");
+
     // ---------------------------------------------------------------- assets
     std::printf ("- artwork\n");
     {
@@ -800,6 +807,162 @@ int main()
             block.clear(); p.processBlock (block, midi);
             check (p.getLatencySamples() > 0, "8x oversampling reports latency (got "
                                                 + juce::String (p.getLatencySamples()) + ")");
+        }
+    }
+
+    // ---------------------------------------------------------------- library
+    std::printf ("- rescue library\n");
+    {
+        const double sr = 48000.0;
+        auto sampleDir = testRoot.getChildFile ("samples");
+        sampleDir.createDirectory();
+
+        // Fixture generator: write a mono wav.
+        auto writeWav = [&] (const juce::String& name,
+                             std::function<float (int)> gen, double seconds)
+        {
+            juce::WavAudioFormat wav;
+            auto file = sampleDir.getChildFile (name);
+            auto stream = file.createOutputStream();
+            std::unique_ptr<juce::AudioFormatWriter> writer (
+                wav.createWriterFor (stream.get(), sr, 1, 16, {}, 0));
+            check (writer != nullptr, "wav writer for " + name);
+            if (writer == nullptr)
+                return;
+            stream.release();     // writer owns it now
+
+            const int n = (int) (sr * seconds);
+            juce::AudioBuffer<float> b (1, n);
+            for (int i = 0; i < n; ++i)
+                b.setSample (0, i, gen (i));
+            writer->writeFromAudioSampleBuffer (b, 0, n);
+        };
+
+        juce::Random rng (0x11b);
+        float hpState = 0.0f;
+        writeWav ("kick_a.wav", [&] (int i)
+        {
+            const float env = std::exp (-4.0f * (float) i / (float) sr / 0.5f * 4.0f);
+            return 0.9f * env * (float) std::sin (2.0 * juce::MathConstants<double>::pi * 55.0 * i / sr);
+        }, 0.5);
+        writeWav ("kick_b.wav", [&] (int i)
+        {
+            const float env = std::exp (-3.0f * (float) i / (float) sr / 0.7f * 4.0f);
+            return 0.8f * env * (float) std::sin (2.0 * juce::MathConstants<double>::pi * 60.0 * i / sr);
+        }, 0.7);
+        writeWav ("hat.wav", [&] (int i)
+        {
+            const float white = rng.nextFloat() * 2.0f - 1.0f;
+            const float hp = white - hpState;
+            hpState = white;
+            juce::ignoreUnused (i);
+            return 0.5f * hp;
+        }, 0.25);
+        writeWav ("sub808.wav", [&] (int i)
+        {
+            return 0.7f * (float) std::sin (2.0 * juce::MathConstants<double>::pi * 45.0 * i / sr);
+        }, 2.5);
+        writeWav ("pad.wav", [&] (int i)
+        {
+            return 0.2f * (float) (std::sin (2.0 * juce::MathConstants<double>::pi * 220.0 * i / sr)
+                                 + std::sin (2.0 * juce::MathConstants<double>::pi * 330.0 * i / sr)
+                                 + std::sin (2.0 * juce::MathConstants<double>::pi * 440.0 * i / sr));
+        }, 4.0);
+
+        // --- per-file analysis ground truth.
+        {
+            juce::AudioFormatManager fm;
+            fm.registerBasicFormats();
+            LibraryEntry e;
+            check (RescueLibrary::analyseFile (sampleDir.getChildFile ("kick_a.wav"), fm, e),
+                   "kick_a analyses");
+            check (e.bandLevelDb[0] == 0.0f, "kick_a is sub-dominant");
+            checkNear (e.durationSec, 0.5, 0.05, "kick_a duration");
+
+            LibraryEntry h;
+            check (RescueLibrary::analyseFile (sampleDir.getChildFile ("hat.wav"), fm, h),
+                   "hat analyses");
+            check (h.bandLevelDb[4] == 0.0f || h.bandLevelDb[3] == 0.0f,
+                   "hat is high-dominant");
+        }
+
+        // --- scan + match + persistence.
+        {
+            RescueLibrary lib;
+            lib.addFolder (sampleDir);
+
+            int waited = 0;
+            while (lib.isScanning() && waited < 400) { juce::Thread::sleep (25); ++waited; }
+            check (! lib.isScanning(), "scan finishes");
+            check (lib.getIndexedCount() == 5, "all five fixtures indexed (got "
+                                                 + juce::String (lib.getIndexedCount()) + ")");
+            check (RescueLibrary::indexFile().existsAsFile(), "index persisted to disk");
+
+            const auto forKick = lib.match (1);
+            check ((int) forKick.size() == 5, "match returns the full top list");
+            for (size_t i = 1; i < forKick.size(); ++i)
+                check (forKick[i - 1].fitPercent >= forKick[i].fitPercent,
+                       "fit sorted descending");
+            check (forKick.back().fileName == "hat.wav",
+                   "hat ranks last for a Kick (got last = " + forKick.back().fileName + ")");
+            check (forKick.front().fileName != "hat.wav"
+                     && forKick.front().fileName != "pad.wav",
+                   "a low-end one-shot ranks first for a Kick (got "
+                     + forKick.front().fileName + ")");
+            for (const auto& sugg : forKick)
+                check (sugg.fitPercent >= 1 && sugg.fitPercent <= 99, "fit in range");
+
+            const auto again = lib.match (1);
+            check (again.front().path == forKick.front().path
+                     && again.back().path == forKick.back().path,
+                   "matching is deterministic");
+
+            const auto forHatType = lib.match (6);
+            check (forHatType.front().fileName == "hat.wav",
+                   "hat ranks first for the Hat type (got " + forHatType.front().fileName + ")");
+
+            // Favourites persist through the index file.
+            lib.setFavourite (sampleDir.getChildFile ("pad.wav").getFullPathName(), true);
+        }
+        {
+            RescueLibrary reloaded;
+            check (reloaded.getIndexedCount() == 5, "index reloads from disk");
+            const auto matched = reloaded.match (9, 5);
+            bool padFav = false;
+            for (const auto& s2 : matched)
+                if (s2.fileName == "pad.wav" && s2.favourite)
+                    padFav = true;
+            check (padFav, "favourite survives reload");
+        }
+
+        // --- preview audition mixes into the output and stops.
+        {
+            SourceGloProcessor p;
+            p.setPlayConfigDetails (2, 2, 48000.0, 512);
+            p.prepareToPlay (48000.0, 512);
+
+            juce::AudioBuffer<float> block (2, 512);
+            juce::MidiBuffer midi;
+
+            p.togglePreview (sampleDir.getChildFile ("sub808.wav").getFullPathName());
+            check (p.getPreviewPath().isNotEmpty(), "preview reports active");
+
+            float heard = 0.0f;
+            for (int b = 0; b < 20; ++b)
+            {
+                block.clear();
+                p.processBlock (block, midi);
+                heard = juce::jmax (heard, block.getMagnitude (0, 0, 512));
+            }
+            check (heard > 0.05f, "preview is audible on silent input (peak "
+                                    + juce::String (heard, 3) + ")");
+
+            p.togglePreview (sampleDir.getChildFile ("sub808.wav").getFullPathName());
+            for (int b = 0; b < 4; ++b) { block.clear(); p.processBlock (block, midi); }
+            block.clear();
+            p.processBlock (block, midi);
+            check (block.getMagnitude (0, 0, 512) < 1.0e-4f, "preview stops silent");
+            check (p.getPreviewPath().isEmpty(), "preview reports stopped");
         }
     }
 

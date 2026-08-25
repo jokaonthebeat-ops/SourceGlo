@@ -68,10 +68,18 @@ SourceGloProcessor::SourceGloProcessor()
 {
     fftBuffer.resize ((size_t) fftFifo.getTotalSize());
     postBuffer.resize ((size_t) postFifo.getTotalSize());
+    previewFormats.registerBasicFormats();
+    library.changed.addChangeListener (this);
+
+    // A previously indexed library fills the suggestions straight away.
+    if (library.getIndexedCount() > 0)
+        analysis.rescues = library.match (
+            (int) apvts.getRawParameterValue (pid::sourceType)->load());
 }
 
 SourceGloProcessor::~SourceGloProcessor()
 {
+    library.changed.removeChangeListener (this);
     // A worker job captures a WeakReference, but the pool itself must not
     // outlive the object whose member it is.
     analysisPool.removeAllJobs (true, 2000);
@@ -99,6 +107,7 @@ void SourceGloProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
     liveTruePeak.reset();
 
     fixChain.prepare (sampleRate, samplesPerBlock);
+    previewPlayer.prepare (sampleRate);
     reportedLatency = -1;   // re-report on the first block
 }
 
@@ -231,6 +240,9 @@ void SourceGloProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::M
         }
     }
 
+    // Rescue preview audition rides on top of the output.
+    previewPlayer.mixInto (buffer);
+
     for (int ch = 0; ch < numCh; ++ch)
     {
         outPeak[ch].store (buffer.getMagnitude (ch, 0, numSamples));
@@ -301,6 +313,11 @@ void SourceGloProcessor::publishResult (const AnalysisResult& result)
 
     analysis.diagnostics = result.diagnostics;
     lastAnalysis = result;
+
+    if (apvts.getRawParameterValue (pid::autoMatch)->load() > 0.5f)
+        analysis.rescues = library.match (
+            (int) apvts.getRawParameterValue (pid::sourceType)->load());
+
     analyzing.store (false);
     analysisChanged.sendChangeMessage();
 }
@@ -337,6 +354,30 @@ void SourceGloProcessor::analyzeNow()
     capture.snapshot (snapshot);
     const int type = (int) apvts.getRawParameterValue (pid::sourceType)->load();
     publishResult (AnalysisEngine::analyse (snapshot, capture.sampleRate(), type));
+}
+
+void SourceGloProcessor::togglePreview (const juce::String& path)
+{
+    if (previewPlayer.getActivePath() == path)
+        previewPlayer.stop();
+    else
+        previewPlayer.start (juce::File (path), previewFormats);
+}
+
+void SourceGloProcessor::refreshRescues()
+{
+    const int type = (int) apvts.getRawParameterValue (pid::sourceType)->load();
+    analysis.rescues = library.match (type);
+    analysisChanged.sendChangeMessage();
+}
+
+void SourceGloProcessor::changeListenerCallback (juce::ChangeBroadcaster*)
+{
+    // Library scan progressed or favourites changed: refresh the rescue list
+    // when Auto Match is on (or when the list has never been filled).
+    if (apvts.getRawParameterValue (pid::autoMatch)->load() > 0.5f
+         || analysis.rescues.empty())
+        refreshRescues();
 }
 
 void SourceGloProcessor::requestFixSource()

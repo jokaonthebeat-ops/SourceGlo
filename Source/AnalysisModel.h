@@ -26,11 +26,14 @@ struct Diagnostic
 
 struct RescueSuggestion
 {
+    static constexpr int waveformBars = 24;
+
+    juce::String path;              // absolute path in the user's library
     juce::String fileName;
-    juce::String tagA, tagB;
+    juce::String tagA, tagB;        // descriptors derived from the file's analysis
     int fitPercent = 0;
     bool favourite = false;
-    juce::uint32 waveformSeed = 0;  // seeds the placeholder thumbnail
+    std::array<float, waveformBars> waveform {};   // 0..1 overview bars
 };
 
 // Live/analysed source statistics. Peak/RMS/crest/true-peak update
@@ -75,14 +78,8 @@ struct AnalysisModel
 
     std::vector<Diagnostic> diagnostics;   // empty until analysed
 
-    // Placeholder until the rescue-library milestone.
-    std::vector<RescueSuggestion> rescues {
-        { "Kick_034.wav",   "Modern",  "Punchy",   96, false, 0x034u },
-        { "Kick_021.wav",   "Deep",    "Tight",    92, false, 0x021u },
-        { "Kick_047.wav",   "Warm",    "Full",     88, false, 0x047u },
-        { "Sub_Kick_12.wav","Low",     "Extended", 85, false, 0x012u },
-        { "Kick_009.wav",   "Vintage", "Thump",    82, false, 0x009u },
-    };
+    // Filled by RescueLibrary::match; empty until the library has content.
+    std::vector<RescueSuggestion> rescues;
 
     // Masking / fit view. Targets default to the mix-target pentagon so the
     // empty state still shows the goal shape.

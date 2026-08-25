@@ -66,6 +66,11 @@ namespace
 
 const float* AnalysisEngine::bandEdgesHz()  { return kBandEdges; }
 
+float AnalysisEngine::targetBandDb (int typeIndex, int band)
+{
+    return profileFor (typeIndex).target[juce::jlimit (0, kNumBands - 1, band)];
+}
+
 // =============================================================================
 //  Analysis
 // =============================================================================

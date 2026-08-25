@@ -96,6 +96,8 @@ public:
         addAndMakeVisible (rescue);
         addAndMakeVisible (footer);
         addChildComponent (debugOverlay);   // hidden until Cmd+Shift+D
+
+        rescue.onBrowseLibrary = [this] { analysisTabs.selectTab (4); };
         setSize (Design::width, Design::height);
     }
 

@@ -37,9 +37,65 @@ int main (int argc, char** argv)
         height = sizeArg.fromFirstOccurrenceOf ("x", false, false).getIntValue();
     }
 
+    // Signal shots build a small generated demo library in a scratch
+    // location (never the user's real index) so the rescue rows and the
+    // Library tab show the feature live.
+    if (modeArg == "signal")
+    {
+        auto demoRoot = juce::File::getSpecialLocation (juce::File::tempDirectory)
+                          .getChildFile ("SourceGloDemoLibrary");
+        RescueLibrary::indexFileOverride() = demoRoot.getChildFile ("LibraryIndex.json");
+        auto sampleDir = demoRoot.getChildFile ("samples");
+        sampleDir.createDirectory();
+
+        struct Demo { const char* name; double freq, seconds, decay; };
+        const Demo demos[] = {
+            { "Kick_Deep_01.wav",   52.0, 0.55, 6.0 },
+            { "Kick_Punch_02.wav",  58.0, 0.40, 9.0 },
+            { "Kick_Vintage_03.wav",49.0, 0.70, 5.0 },
+            { "Kick_Tight_04.wav",  63.0, 0.30, 12.0 },
+            { "Sub_808_Long.wav",   45.0, 2.20, 1.2 },
+        };
+
+        juce::WavAudioFormat wav;
+        for (const auto& d : demos)
+        {
+            auto file = sampleDir.getChildFile (d.name);
+            if (file.existsAsFile())
+                continue;
+            auto stream = file.createOutputStream();
+            std::unique_ptr<juce::AudioFormatWriter> writer (
+                wav.createWriterFor (stream.get(), 48000.0, 1, 16, {}, 0));
+            if (writer == nullptr)
+                continue;
+            stream.release();
+            const int n = (int) (48000.0 * d.seconds);
+            juce::AudioBuffer<float> b (1, n);
+            double phase = 0.0;
+            for (int i = 0; i < n; ++i)
+            {
+                const double t = i / 48000.0;
+                const float env = (float) std::exp (-t * d.decay);
+                phase += 2.0 * juce::MathConstants<double>::pi * (d.freq + 20.0 * env) / 48000.0;
+                b.setSample (0, i, 0.85f * env * (float) std::sin (phase));
+            }
+            writer->writeFromAudioSampleBuffer (b, 0, n);
+        }
+    }
+
     SourceGloProcessor processor;
     processor.setPlayConfigDetails (2, 2, 48000.0, 512);
     processor.prepareToPlay (48000.0, 512);
+
+    if (modeArg == "signal")
+    {
+        auto sampleDir = juce::File::getSpecialLocation (juce::File::tempDirectory)
+                           .getChildFile ("SourceGloDemoLibrary/samples");
+        processor.getLibrary().addFolder (sampleDir);
+        for (int i = 0; i < 200 && processor.getLibrary().isScanning(); ++i)
+            juce::Thread::sleep (20);
+        processor.refreshRescues();
+    }
 
     // Match the approved reference in signal mode: source type Kick. Set
     // before the editor exists so the dropdown constructs with it.

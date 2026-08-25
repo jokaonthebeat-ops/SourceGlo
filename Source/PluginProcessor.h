@@ -15,6 +15,8 @@
 #include "dsp/CaptureRing.h"
 #include "dsp/TruePeakMeter.h"
 #include "dsp/FixChain.h"
+#include "library/RescueLibrary.h"
+#include "library/PreviewPlayer.h"
 #include "dsp/AnalysisEngine.h"
 
 namespace sourceglo
@@ -41,7 +43,8 @@ namespace pid
     inline constexpr const char* bypass       = "bypass";
 }
 
-class SourceGloProcessor : public juce::AudioProcessor
+class SourceGloProcessor : public juce::AudioProcessor,
+                           private juce::ChangeListener
 {
 public:
     SourceGloProcessor();
@@ -122,6 +125,12 @@ public:
     void setCompareRaw (bool raw)                          { compareRaw.store (raw); }
     bool isComparingRaw() const                            { return compareRaw.load(); }
 
+    // --- rescue library + preview -----------------------------------------
+    RescueLibrary& getLibrary()                            { return library; }
+    void togglePreview (const juce::String& path);         // message thread
+    juce::String getPreviewPath() const                    { return previewPlayer.getActivePath(); }
+    void refreshRescues();                                 // message thread
+
 private:
     static juce::AudioProcessorValueTreeState::ParameterLayout createLayout();
 
@@ -147,6 +156,12 @@ private:
 
     juce::AbstractFifo postFifo { fftSize * 4 };
     std::vector<float> postBuffer;
+
+    void changeListenerCallback (juce::ChangeBroadcaster*) override;   // library scans
+
+    RescueLibrary library;
+    PreviewPlayer previewPlayer;
+    juce::AudioFormatManager previewFormats;
 
     juce::ThreadPool analysisPool { 1 };
 

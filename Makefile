@@ -24,7 +24,7 @@
 # =============================================================================
 
 PROJECT      := SourceGloPro
-VERSION      := 0.9.2
+VERSION      := 0.9.3
 JUCE_DIR     := /Users/jokabeatz/Documents/JUCE
 JUCE_MODULES := $(JUCE_DIR)/modules
 VST3_SDK     := $(JUCE_MODULES)/juce_audio_processors_headless/format_types/VST3_SDK
@@ -182,7 +182,8 @@ JUCE_C_SRCS := \
 # edits.
 PLUGIN_SRCS := $(wildcard $(SRC)/*.cpp) $(wildcard $(SRC)/dsp/*.cpp) \
                $(wildcard $(SRC)/params/*.cpp) $(wildcard $(SRC)/ui/*.cpp) \
-               $(wildcard $(SRC)/state/*.cpp) $(wildcard $(SRC)/presets/*.cpp)
+               $(wildcard $(SRC)/state/*.cpp) $(wildcard $(SRC)/presets/*.cpp) \
+               $(wildcard $(SRC)/library/*.cpp)
 
 VST3_WRAPPER := $(JUCE_MODULES)/juce_audio_plugin_client/juce_audio_plugin_client_VST3.mm
 AU_WRAPPERS  := $(JUCE_MODULES)/juce_audio_plugin_client/juce_audio_plugin_client_AU_1.mm \
