@@ -489,6 +489,19 @@ int main()
             check (m.score >= 0 && m.score <= 100, "score in range");
             check (m.stats.durationSec > 3.0f, "duration captured");
             check (! m.diagnostics.empty(), "diagnostics produced");
+
+            // The tab views read the full band picture from the model.
+            bool loudestFound = false;
+            for (int band = 0; band < 5; ++band)
+            {
+                check (m.bandLevelDb[band] <= 0.01f, "band level re loudest is <= 0");
+                if (std::abs (m.bandLevelDb[band]) < 0.01f)
+                    loudestFound = true;
+            }
+            check (loudestFound, "one band is the loudest reference");
+            check (m.bandLevelDb[0] > -10.0f, "kick fixture is sub-heavy in the model");
+            check (std::abs (m.correlation - 1.0f) < 0.05f,
+                   "dual-mono fixture reports full correlation");
         }
     }
 

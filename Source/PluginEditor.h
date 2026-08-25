@@ -37,6 +37,9 @@ public:
     // Drives every display timer once, synchronously - used by make uishot.
     void refreshDisplays();
 
+    // Headless tools: switch the lower panel's tab for a screenshot.
+    void showAnalysisTab (int index);
+
 private:
     class ContentComponent;
     class DebugOverlay;

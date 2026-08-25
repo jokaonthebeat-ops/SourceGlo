@@ -81,6 +81,12 @@ struct AnalysisModel
     // Filled by RescueLibrary::match; empty until the library has content.
     std::vector<RescueSuggestion> rescues;
 
+    // Full band picture for the Fit and Detail tabs (dB re loudest band,
+    // and deviation from the source-type target).
+    float bandLevelDb[5] { -60, -60, -60, -60, -60 };
+    float bandDeviationDb[5] { 0, 0, 0, 0, 0 };
+    float correlation = 1.0f, lowCorrelation = 1.0f;
+
     // Masking / fit view. Targets default to the mix-target pentagon so the
     // empty state still shows the goal shape.
     int bandFit[5] { 0, 0, 0, 0, 0 };

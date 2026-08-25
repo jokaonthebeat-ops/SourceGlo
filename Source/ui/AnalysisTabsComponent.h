@@ -12,6 +12,9 @@
 #include "SpectrumAnalyzerComponent.h"
 #include "MaskingFitComponent.h"
 #include "LibraryViewComponent.h"
+#include "FitTabView.h"
+#include "RescueTabView.h"
+#include "DetailTabView.h"
 
 namespace sourceglo
 {
@@ -20,12 +23,16 @@ class AnalysisTabsComponent : public juce::Component
 {
 public:
     explicit AnalysisTabsComponent (SourceGloProcessor& p)
-        : spectrum (p), maskingFit (p), libraryView (p)
+        : spectrum (p), maskingFit (p), libraryView (p),
+          fitView (p), rescueView (p), detailView (p)
     {
         setTitle ("Analysis views");
         addAndMakeVisible (spectrum);
         addAndMakeVisible (maskingFit);
         addChildComponent (libraryView);
+        addChildComponent (fitView);
+        addChildComponent (rescueView);
+        addChildComponent (detailView);
     }
 
     void selectTab (int index)
@@ -45,6 +52,12 @@ public:
         // the panel edge, over the shell's divider zone.
         spectrum.setBounds (9, 46, 412, 300);
         maskingFit.setBounds (412, 46, 339, 263);
+
+        const juce::Rectangle<int> content (9, 46, 742, 263);
+        libraryView.setBounds (content);
+        fitView.setBounds (content);
+        rescueView.setBounds (content);
+        detailView.setBounds (content);
     }
 
     void paint (juce::Graphics& g) override
@@ -71,32 +84,6 @@ public:
             g.drawText (tabNames[i], r, juce::Justification::centred);
         }
 
-        // --- FIT / RESCUE / DETAIL: placeholder view in the content region.
-        if (activeTab != 0 && activeTab != 4)
-        {
-            const juce::Rectangle<int> content (9, 46, 742, 263);
-
-            auto mark = Assets::premiumMark (256);
-            if (mark.isValid())
-            {
-                g.setOpacity (0.16f);
-                g.drawImage (mark, content.withSizeKeepingCentre (110, 110).toFloat(),
-                             juce::RectanglePlacement::centred);
-                g.setOpacity (1.0f);
-            }
-
-            g.setFont (Fonts::panelTitle());
-            g.setColour (tokens::text);
-            g.drawText (juce::String (tabNames[activeTab]),
-                        content.withTrimmedTop (150).withHeight (20),
-                        juce::Justification::centred);
-
-            g.setFont (Fonts::bodyLabel());
-            g.setColour (tokens::muted);
-            g.drawText ("This view arrives with the analysis engine milestone.",
-                        content.withTrimmedTop (174).withHeight (16),
-                        juce::Justification::centred);
-        }
     }
 
     void mouseMove (const juce::MouseEvent& e) override
@@ -140,12 +127,18 @@ private:
     {
         spectrum.setVisible (activeTab == 0);
         maskingFit.setVisible (activeTab == 0);
+        fitView.setVisible (activeTab == 1);
+        rescueView.setVisible (activeTab == 2);
+        detailView.setVisible (activeTab == 3);
         libraryView.setVisible (activeTab == 4);
     }
 
     SpectrumAnalyzerComponent spectrum;
     MaskingFitComponent maskingFit;
     LibraryViewComponent libraryView;
+    FitTabView fitView;
+    RescueTabView rescueView;
+    DetailTabView detailView;
 
     int activeTab = 0, hoverTab = -1;
 };

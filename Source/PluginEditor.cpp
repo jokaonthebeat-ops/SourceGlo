@@ -225,6 +225,11 @@ bool SourceGloEditor::keyPressed (const juce::KeyPress& key)
     return false;
 }
 
+void SourceGloEditor::showAnalysisTab (int index)
+{
+    content->analysisTabs.selectTab (index);
+}
+
 void SourceGloEditor::refreshDisplays()
 {
     headlessRefreshMode() = true;

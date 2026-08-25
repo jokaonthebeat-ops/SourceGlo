@@ -303,10 +303,14 @@ void SourceGloProcessor::publishResult (const AnalysisResult& result)
 
         for (int b = 0; b < AnalysisResult::numBands; ++b)
         {
-            analysis.bandFit[b]     = result.bandFit[b];
-            analysis.radarSource[b] = result.radarSource[b];
-            analysis.radarTarget[b] = result.radarTarget[b];
+            analysis.bandFit[b]         = result.bandFit[b];
+            analysis.radarSource[b]     = result.radarSource[b];
+            analysis.radarTarget[b]     = result.radarTarget[b];
+            analysis.bandLevelDb[b]     = result.bandLevelDb[b];
+            analysis.bandDeviationDb[b] = result.bandDeviationDb[b];
         }
+        analysis.correlation    = result.correlation;
+        analysis.lowCorrelation = result.lowCorrelation;
 
         analysis.conflictLoHz  = result.conflictLoHz;
         analysis.conflictHiHz  = result.conflictHiHz;

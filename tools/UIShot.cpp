@@ -27,6 +27,7 @@ int main (int argc, char** argv)
     const bool wantFix = modeArg == "fix";      // signal + engage the correction
     if (wantFix)
         modeArg = "signal";
+    const int wantTab = argc > 4 ? juce::String (argv[4]).getIntValue() : 0;
 
     int width = Design::width, height = Design::height;
     if (sizeArg == "min")      { width = Design::minWidth; height = Design::minHeight; }
@@ -159,6 +160,9 @@ int main (int argc, char** argv)
         if (wantFix)
             processor.requestFixSource();
     }
+
+    if (sgEditor != nullptr && wantTab > 0)
+        sgEditor->showAnalysisTab (wantTab);
 
     // Let the animated displays settle (score climb, spectrum smoothing).
     if (sgEditor != nullptr)
