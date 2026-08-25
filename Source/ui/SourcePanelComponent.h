@@ -29,8 +29,6 @@ public:
             (int) processor.getAPVTS().getRawParameterValue (pid::sourceType)->load(),
             juce::dontSendNotification);
 
-        addAndMakeVisible (inputDropdown);
-        addAndMakeVisible (outputDropdown);
 
         addAndMakeVisible (inMeterL);
         addAndMakeVisible (inMeterR);
@@ -71,14 +69,12 @@ public:
     void resized() override
     {
         typeDropdown.setBounds   (14,  91, 205, 32);
-        inputDropdown.setBounds  (14, 167, 205, 28);
 
         inMeterL.setBounds  (47, 203, 22, 78);
         inMeterR.setBounds  (71, 203, 22, 78);
         inputTrim.setBounds (146, 203, 44, 44);
         invButton.setBounds (148, 252, 46, 18);
 
-        outputDropdown.setBounds (14, 317, 205, 28);
         outMeterL.setBounds  (47, 353, 22, 78);
         outMeterR.setBounds  (71, 353, 22, 78);
         outputTrim.setBounds (146, 353, 44, 44);
@@ -103,6 +99,12 @@ public:
         title ("INPUT",       28, 148, tokens::text);
         title ("OUTPUT",      28, 301, tokens::text);
         title ("SOURCE STATS",28, 455, tokens::text);
+
+        // Input / output readouts: what the plugin actually sits on. The
+        // input shows the host's track name where the host provides one -
+        // the honest version of the mockup's "Track 07 - Kick" sample text.
+        drawReadout (g, { 14, 167, 205, 28 }, processor.getInputDisplayName());
+        drawReadout (g, { 14, 317, 205, 28 }, processor.getOutputDisplayName());
 
         drawMeterScale (g, 44, 203, 78);
         drawMeterScale (g, 44, 353, 78);
@@ -150,6 +152,23 @@ public:
     }
 
 private:
+    void drawReadout (juce::Graphics& g, juce::Rectangle<int> r, const juce::String& text)
+    {
+        auto art = Assets::dropdown();
+        if (art.isValid())
+            g.drawImage (art, r.toFloat(), juce::RectanglePlacement::stretchToFit);
+        else
+        {
+            g.setColour (tokens::panelHigh);
+            g.fillRoundedRectangle (r.toFloat(), 5.0f);
+            g.setColour (tokens::stroke);
+            g.drawRoundedRectangle (r.toFloat().reduced (0.5f), 5.0f, 1.0f);
+        }
+        g.setColour (tokens::white);
+        g.setFont (Fonts::bodyValue());
+        g.drawText (text, r.reduced (12, 0), juce::Justification::centredLeft, true);
+    }
+
     juce::Rectangle<int> trimValueArea (bool input) const
     {
         return { 196, input ? 217 : 367, 46, 16 };
@@ -207,7 +226,8 @@ private:
 
     void changeListenerCallback (juce::ChangeBroadcaster*) override
     {
-        repaint (14, 455, 215, 210);
+        repaint (14, 167, 205, 28);    // input readout (host track name)
+        repaint (14, 455, 215, 210);   // stats block
     }
 
     SourceGloProcessor& processor;
@@ -215,8 +235,6 @@ private:
     AssetDropdown typeDropdown   { "Source type",
         { "Auto", "Kick", "Snare", "Clap", "808", "Bass", "Hat",
           "Percussion", "Loop", "Melody", "Vocal", "Other" }, 1 };
-    AssetDropdown inputDropdown  { "Input routing", { "Track 07 - Kick", "Main Input" }, 0 };
-    AssetDropdown outputDropdown { "Output routing", { "SourceGlo Out", "Main Output" }, 0 };
 
     VerticalMeter inMeterL, inMeterR, outMeterL, outMeterR;
     FilmstripKnob inputTrim  { true, "Input trim" };

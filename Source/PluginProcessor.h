@@ -61,6 +61,13 @@ public:
     juce::AudioProcessorEditor* createEditor() override;
     bool hasEditor() const override                        { return true; }
 
+    // Hosts that support it (Logic, Live, Cubase...) hand the plugin the
+    // name of the track it sits on - the honest version of the mockup's
+    // "Track 07 - Kick" input readout.
+    void updateTrackProperties (const TrackProperties& properties) override;
+    juce::String getInputDisplayName() const;
+    juce::String getOutputDisplayName() const;
+
     const juce::String getName() const override            { return JucePlugin_Name; }
     bool acceptsMidi() const override                      { return false; }
     bool producesMidi() const override                     { return false; }
@@ -186,6 +193,9 @@ private:
 
     std::unique_ptr<PresetBank> presetBank;    // after the APVTS
     std::atomic<float> uiScale { 1.0f };
+
+    juce::CriticalSection trackNameLock;
+    juce::String hostTrackName;                // guarded by trackNameLock
 
     JUCE_DECLARE_WEAK_REFERENCEABLE (SourceGloProcessor)
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (SourceGloProcessor)

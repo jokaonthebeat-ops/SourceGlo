@@ -459,6 +459,30 @@ void SourceGloProcessor::Reanalyzer::timerCallback()
     owner.requestAnalyze();
 }
 
+void SourceGloProcessor::updateTrackProperties (const TrackProperties& properties)
+{
+    {
+        const juce::ScopedLock sl (trackNameLock);
+        hostTrackName = properties.name.value_or (juce::String());
+    }
+    analysisChanged.sendChangeMessage();       // refresh the source panel
+}
+
+juce::String SourceGloProcessor::getInputDisplayName() const
+{
+    {
+        const juce::ScopedLock sl (trackNameLock);
+        if (hostTrackName.isNotEmpty())
+            return hostTrackName;
+    }
+    return getMainBusNumInputChannels() >= 2 ? "Stereo In" : "Mono In";
+}
+
+juce::String SourceGloProcessor::getOutputDisplayName() const
+{
+    return getMainBusNumOutputChannels() >= 2 ? "Stereo Out" : "Mono Out";
+}
+
 void SourceGloProcessor::togglePreview (const juce::String& path)
 {
     if (previewPlayer.getActivePath() == path)

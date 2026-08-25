@@ -1218,6 +1218,30 @@ int main()
         }
     }
 
+    // ------------------------------------------------------- track readouts
+    std::printf ("- input/output readouts\n");
+    {
+        SourceGloProcessor p;
+        p.setPlayConfigDetails (2, 2, 48000.0, 512);
+        p.prepareToPlay (48000.0, 512);
+
+        check (p.getInputDisplayName() == "Stereo In",
+               "input readout defaults to the bus layout (got '"
+                 + p.getInputDisplayName() + "')");
+        check (p.getOutputDisplayName() == "Stereo Out", "output readout shows the bus");
+
+        juce::AudioProcessor::TrackProperties props;
+        props.name = juce::String ("Kick Bus 07");
+        p.updateTrackProperties (props);
+        check (p.getInputDisplayName() == "Kick Bus 07",
+               "host track name takes over the input readout");
+
+        props.name = juce::String();
+        p.updateTrackProperties (props);
+        check (p.getInputDisplayName() == "Stereo In",
+               "empty host name falls back to the bus layout");
+    }
+
     // ------------------------------------------------------------------ state
     std::printf ("- state round-trip\n");
     {
