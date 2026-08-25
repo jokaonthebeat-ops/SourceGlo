@@ -217,6 +217,7 @@ int main()
         setParam (p, pid::stereo, 0.0f);
         setParam (p, pid::transients, 0.0f);
         setParam (p, pid::saturate, 0.0f);
+        setParam (p, pid::sub, 0.0f);
 
         // Unity: -20 dBFS sine in -> same RMS out (sine RMS = amp/sqrt2).
         const double unityRms = processSineRms (p, 1000.0, 0.1f);
@@ -590,6 +591,13 @@ int main()
             checkNear (chainGainDb (500.0, m), 0.0, 0.75, "Air 100 leaves 500 Hz alone");
         }
 
+        // --- Sub: +9 dB shelf at the bottom, transparent above.
+        {
+            auto m = neutral; m.sub = 1.0f;
+            checkNear (chainGainDb (25.0, m), 9.0, 1.2, "Sub 100 -> +9 dB deep in the shelf");
+            checkNear (chainGainDb (500.0, m), 0.0, 0.75, "Sub 100 leaves 500 Hz alone");
+        }
+
         // --- Saturate: drive 0 is bit-exact dry; full drive keeps level and
         //     generates real odd harmonics.
         {
@@ -735,6 +743,7 @@ int main()
             setParam (p, pid::stereo, 0.0f);
             setParam (p, pid::transients, 0.0f);
             setParam (p, pid::saturate, 0.0f);
+            setParam (p, pid::sub, 0.0f);
             setParam (p, pid::sourceType, 10.0f);   // Vocal profile
             setParam (p, pid::fixAmount, 100.0f);
 
@@ -823,6 +832,58 @@ int main()
             check (p.isFixEngaged(), "fix engaged on the hot kick");
             check (! headroomHot,
                    "fix holds the -1 dBTP ceiling through the nonlinear chain");
+        }
+
+        // --- peak taming: a spiky source raises Peaks Uncontrolled and the
+        //     fix clears it (macros neutral so the shaper does not re-spike).
+        {
+            SourceGloProcessor p;
+            p.setPlayConfigDetails (2, 2, 48000.0, 512);
+            p.prepareToPlay (48000.0, 512);
+            setParam (p, pid::punch, 0.0f);
+            setParam (p, pid::body, 0.0f);
+            setParam (p, pid::tone, 50.0f);
+            setParam (p, pid::air, 0.0f);
+            setParam (p, pid::stereo, 0.0f);
+            setParam (p, pid::transients, 0.0f);
+            setParam (p, pid::saturate, 0.0f);
+            setParam (p, pid::sub, 0.0f);
+            setParam (p, pid::sourceType, 4.0f);    // 808: crest window 4-10 dB
+            setParam (p, pid::fixAmount, 100.0f);
+
+            // Quiet sine bed with towering 2 ms clicks every 250 ms.
+            juce::AudioBuffer<float> block (2, 512);
+            juce::MidiBuffer midi;
+            double phase = 0.0;
+            int n = 0;
+            for (int b = 0; b < (int) (48000.0 * 3.0 / 512); ++b)
+            {
+                for (int i = 0; i < 512; ++i, ++n)
+                {
+                    float v = 0.06f * (float) std::sin (phase);
+                    phase += 2.0 * juce::MathConstants<double>::pi * 50.0 / 48000.0;
+                    if (n % 12000 < 96)
+                        v += 0.85f * (float) std::sin (2.0 * juce::MathConstants<double>::pi
+                                                         * 900.0 * (n % 12000) / 48000.0);
+                    block.setSample (0, i, v);
+                    block.setSample (1, i, v);
+                }
+                p.processBlock (block, midi);
+            }
+
+            p.analyzeNow();
+            bool spikyBefore = false;
+            for (const auto& d : p.getAnalysis().diagnostics)
+                if (d.title == "Peaks Uncontrolled") spikyBefore = true;
+            check (spikyBefore, "spiky source raises Peaks Uncontrolled");
+
+            p.requestFixSource();
+            p.analyzeNow();
+            bool spikyAfter = false;
+            for (const auto& d : p.getAnalysis().diagnostics)
+                if (d.title == "Peaks Uncontrolled") spikyAfter = true;
+            check (p.isFixEngaged(), "fix engaged on the spiky source");
+            check (! spikyAfter, "fix tames the peaks and clears the diagnostic");
         }
 
         // --- engaging the fix snaps A/B back to the processed side.
@@ -1164,6 +1225,8 @@ int main()
                    4.0, 0.01, "preset sets source type 808");
         checkNear ((double) p.getAPVTS().getRawParameterValue (pid::body)->load(),
                    70.0, 0.1, "preset sets Body 70");
+        checkNear ((double) p.getAPVTS().getRawParameterValue (pid::sub)->load(),
+                   45.0, 0.1, "preset sets Sub 45");
         checkNear ((double) p.getAPVTS().getRawParameterValue (pid::inputGain)->load(),
                    -5.0, 0.01, "preset load leaves the input trim alone");
         check (! bank.isModified(), "freshly loaded preset is clean");

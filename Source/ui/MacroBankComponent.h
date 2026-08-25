@@ -87,18 +87,20 @@ private:
 
     juce::String valueText (int i) const
     {
-        const double v = knobs[(size_t) i]->getValue();
-        return i == 7 ? juce::String (v, 1) + " dB"    // Output macro is in dB
-                      : juce::String (juce::roundToInt (v));
+        return juce::String (juce::roundToInt (knobs[(size_t) i]->getValue()));
     }
 
     SourceGloProcessor& processor;
 
+    // Knob 8 was OUTPUT in the approved mockup - a duplicate of the output
+    // trim sitting beside the meters. Swapped for SUB on user feedback: the
+    // row had Air for the top and no control for the bottom. Documented as a
+    // deviation from the reference.
     static constexpr const char* macroNames[8] =
-        { "Punch", "Body", "Tone", "Air", "Stereo", "Transients", "Saturate", "Output" };
+        { "Punch", "Body", "Tone", "Air", "Stereo", "Transients", "Saturate", "Sub" };
     const char* macroParams[8] =
         { pid::punch, pid::body, pid::tone, pid::air,
-          pid::stereo, pid::transients, pid::saturate, pid::outputGain };
+          pid::stereo, pid::transients, pid::saturate, pid::sub };
 
     std::array<std::unique_ptr<FilmstripKnob>, 8> knobs;
     std::array<std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>, 8> attachments;

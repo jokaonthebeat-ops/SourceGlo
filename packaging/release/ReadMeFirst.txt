@@ -37,7 +37,9 @@ plays:
                  headroom trim, low-end mono repair. Fix Amount scales it,
                  A/B compares against the raw source
   MACROS         Punch, Body, Tone, Air, Stereo, Transients, Saturate and
-                 Output - the finishing moves, oversampled where it counts
+                 Sub - the finishing moves, oversampled where it counts.
+                 Sub is a 60 Hz shelf: the bottom-end lift the analysis
+                 keeps asking thin drums for
   RESCUE         when the source is beyond saving, ranked replacements from
                  YOUR OWN sample library. Preview in place, drag the row
                  straight into your project

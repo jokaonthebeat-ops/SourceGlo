@@ -19,7 +19,7 @@ Use marketing/SALES-PAGE.md.
 - Tempo + key detection (bass-weighted chroma - it knows 808 culture)
 - FIX SOURCE: analysis-derived counter-EQ, headroom trim, low-end mono repair
 - Fix Amount scaling and click-free A/B against the raw source
-- 8 macros: Punch, Body, Tone, Air, Stereo, Transients, Saturate, Output
+- 8 macros: Sub, Punch, Body, Tone, Air, Stereo, Transients, Saturate
 - Oversampled saturation (2x/4x/8x) with correct host latency reporting
 - Rescue engine: ranks YOUR sample library, previews in place, drags into
   your DAW

@@ -33,7 +33,7 @@ public:
     struct MacroValues        // 0..1 each, read from the APVTS per block
     {
         float punch = 0.0f, body = 0.0f, tone = 0.5f, air = 0.0f;
-        float stereo = 0.0f, transients = 0.0f, saturate = 0.0f;
+        float stereo = 0.0f, transients = 0.0f, saturate = 0.0f, sub = 0.0f;
         float fixAmount = 0.5f;
         int oversampling = 2;     // 0 Off, 1 2x, 2 4x, 3 8x
         bool hq = true;
@@ -51,6 +51,7 @@ public:
     // output - the saturator is nonlinear, so the first trim estimate always
     // undershoots on hot material.
     void addTrimDb (float delta) noexcept;
+    void addClipDb (float delta) noexcept;
     bool isFixEngaged() const noexcept          { return fixEngaged.load(); }
 
     // Raw correction values, for persistence (state save/load).
@@ -58,6 +59,8 @@ public:
     {
         float bandGainDb[numFixBands] {};
         float trimDb = 0.0f;
+        float clipDb = 0.0f;       // peak taming: dB of crest excess to absorb
+        float peakDb = -120.0f;    // the analysed peak the threshold hangs from
         bool  lowMono = false;
         bool  dcFilter = false;
     };
@@ -76,20 +79,24 @@ private:
     // --- fix targets (message thread writes, audio thread reads) ----------
     std::atomic<float> fixBandDb[numFixBands] { {0}, {0}, {0}, {0}, {0} };
     std::atomic<float> fixTrimDb { 0.0f };
+    std::atomic<float> fixClipDb { 0.0f };
+    std::atomic<float> fixPeakDb { -120.0f };
+    juce::SmoothedValue<float> clipThreshSm;
     std::atomic<bool>  fixLowMono { false };
     std::atomic<bool>  fixDc { false };
     std::atomic<bool>  fixEngaged { false };
 
     // --- smoothers ---------------------------------------------------------
     juce::SmoothedValue<float> fixBandSm[numFixBands], fixTrimSm;
-    juce::SmoothedValue<float> bodySm, toneSm, airSm, widthSm, chainMixSm, lowMonoSm;
+    juce::SmoothedValue<float> bodySm, toneSm, airSm, subSm, widthSm, chainMixSm, lowMonoSm;
 
     // --- filters: [channel] ------------------------------------------------
-    // 5 corrective bands + body bell + tone tilt (low & high shelf) + air.
-    static constexpr int numFilters = numFixBands + 4;
+    // 5 corrective bands + body bell + tone tilt (low & high shelf) + air
+    // + the SUB shelf.
+    static constexpr int numFilters = numFixBands + 5;
     juce::dsp::IIR::Filter<float> filters[2][numFilters];
     float lastFilterGain[numFilters] { 1e9f, 1e9f, 1e9f, 1e9f, 1e9f,
-                                       1e9f, 1e9f, 1e9f, 1e9f };
+                                       1e9f, 1e9f, 1e9f, 1e9f, 1e9f };
     juce::dsp::IIR::Filter<float> dcFilters[2], sideHighPass;
 
     // --- transient shaper --------------------------------------------------

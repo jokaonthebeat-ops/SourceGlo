@@ -35,6 +35,10 @@ struct AnalysisResult
     float correlation = 1.0f, lowCorrelation = 1.0f;
     bool dcOffset = false;
 
+    // How far the crest factor exceeds the profile's window (0 when inside):
+    // the amount of peak taming Fix Source should apply.
+    float peakExcessDb = 0.0f;
+
     // Scores 0..100.
     int score = 0, tone = 0, punch = 0, level = 0, phase = 0, fit = 0;
     int bandFit[numBands] {};
@@ -65,6 +69,10 @@ struct AnalysisEngine
     // The source-type profile's target level for one band (dB re loudest) -
     // the rescue matcher ranks library files against this.
     static float targetBandDb (int sourceTypeIndex, int band);
+
+    // The profile's crest-factor ceiling: above it the peaks count as
+    // uncontrolled and Fix Source tames them toward it.
+    static float crestHighDb (int sourceTypeIndex);
 };
 
 } // namespace sourceglo

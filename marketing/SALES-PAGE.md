@@ -34,8 +34,9 @@ flips you back to the raw source any time. No clicks, ever.
 ## Eight macros that mean it
 
 Punch and Transients shape attacks (the thump and the crack, separately).
-Body, Tone and Air place the balance. Saturate drives an oversampled tanh
-stage — up to 8× — and Stereo widens without ever touching your mono core.
+Sub and Body own the low end — a 60 Hz shelf and a 180 Hz bell — while Tone
+and Air place the balance up top. Saturate drives an oversampled tanh stage
+— up to 8× — and Stereo widens without ever touching your mono core.
 
 ## Rescue: the honest feature
 

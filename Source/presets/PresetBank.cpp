@@ -8,7 +8,7 @@ const juce::StringArray& PresetBank::presetParameterIds()
 {
     static const juce::StringArray ids {
         pid::sourceType, pid::fixAmount, pid::punch, pid::body, pid::tone,
-        pid::air, pid::stereo, pid::transients, pid::saturate
+        pid::air, pid::stereo, pid::transients, pid::saturate, pid::sub
     };
     return ids;
 }
@@ -21,38 +21,38 @@ const juce::StringArray& PresetBank::presetParameterIds()
 void PresetBank::buildFactoryBank()
 {
     struct Row { const char* name; const char* cat; float type, fix, punch,
-                 body, tone, air, stereo, trans, sat; };
+                 body, tone, air, stereo, trans, sat, sub; };
 
     static const Row rows[] = {
-        { "Punchy Kick Starter",  "Kick",   1, 50, 60, 55, 50, 40, 20, 65, 35 },
-        { "Deep Kick Foundation", "Kick",   1, 50, 45, 75, 42, 20,  0, 40, 30 },
-        { "Vintage Kick Warmth",  "Kick",   1, 40, 35, 65, 38, 15, 10, 30, 60 },
-        { "Tight Kick Snap",      "Kick",   1, 55, 80, 35, 55, 45, 10, 80, 25 },
-        { "Deep 808 Control",     "808",    4, 60, 30, 70, 40, 10,  0, 25, 45 },
-        { "Clean Sub 808",        "808",    4, 55, 20, 60, 35,  5,  0, 15, 15 },
-        { "808 Glue & Grit",      "808",    4, 50, 40, 55, 45, 15,  5, 35, 70 },
-        { "Aggressive 808 Bite",  "808",    4, 55, 55, 45, 60, 30, 10, 60, 80 },
-        { "Snare Snap Doctor",    "Snare",  2, 50, 70, 40, 55, 55, 25, 75, 30 },
-        { "Fat Snare Body",       "Snare",  2, 45, 50, 75, 45, 35, 20, 45, 45 },
-        { "Crisp Snare Air",      "Snare",  2, 45, 55, 30, 60, 75, 30, 60, 20 },
-        { "Clap Sheen",           "Clap",   3, 40, 45, 25, 58, 70, 40, 55, 25 },
-        { "Wide Clap Room",       "Clap",   3, 40, 35, 35, 52, 55, 70, 40, 30 },
-        { "Bass Focus Clean",     "Bass",   5, 55, 35, 60, 45, 10,  0, 30, 25 },
-        { "Warm Bass Body",       "Bass",   5, 50, 25, 75, 40,  8,  0, 20, 50 },
-        { "Hat Polish",           "Hat",    6, 40, 40, 10, 62, 70, 35, 55, 15 },
-        { "Crisp Hat Air",        "Hat",    6, 45, 50,  5, 68, 85, 45, 65, 10 },
-        { "Perc Presence",        "Percussion", 7, 45, 55, 30, 58, 55, 45, 60, 25 },
-        { "Loop Glue Fast",       "Loop",   8, 50, 45, 50, 50, 40, 30, 50, 40 },
-        { "Loop Tape Warmth",     "Loop",   8, 45, 30, 65, 42, 25, 25, 35, 65 },
-        { "Loop Wide & Bright",   "Loop",   8, 45, 40, 40, 60, 65, 75, 45, 30 },
-        { "Melody Space",         "Melody", 9, 45, 30, 45, 52, 55, 65, 35, 25 },
-        { "Melody Presence",      "Melody", 9, 50, 45, 50, 58, 60, 35, 55, 35 },
-        { "Vocal Clarity Rescue", "Vocal", 10, 60, 40, 35, 60, 65, 15, 50, 20 },
-        { "Vocal Warm Body",      "Vocal", 10, 50, 30, 70, 45, 40, 10, 35, 40 },
-        { "Vocal Air & Sheen",    "Vocal", 10, 45, 35, 25, 58, 85, 25, 45, 15 },
-        { "Flat Start",           "Utility", 0, 50,  0,  0, 50,  0,  0,  0,  0 },
-        { "Gentle Enhance",       "Utility", 0, 40, 30, 30, 52, 30, 15, 30, 20 },
-        { "Maximum Character",    "Utility", 0, 70, 75, 65, 58, 65, 40, 80, 70 },
+        { "Punchy Kick Starter",  "Kick",   1, 50, 60, 55, 50, 40, 20, 65, 35, 20 },
+        { "Deep Kick Foundation", "Kick",   1, 50, 45, 75, 42, 20,  0, 40, 30, 35 },
+        { "Vintage Kick Warmth",  "Kick",   1, 40, 35, 65, 38, 15, 10, 30, 60, 25 },
+        { "Tight Kick Snap",      "Kick",   1, 55, 80, 35, 55, 45, 10, 80, 25, 15 },
+        { "Deep 808 Control",     "808",    4, 60, 30, 70, 40, 10,  0, 25, 45, 45 },
+        { "Clean Sub 808",        "808",    4, 55, 20, 60, 35,  5,  0, 15, 15, 50 },
+        { "808 Glue & Grit",      "808",    4, 50, 40, 55, 45, 15,  5, 35, 70, 40 },
+        { "Aggressive 808 Bite",  "808",    4, 55, 55, 45, 60, 30, 10, 60, 80, 35 },
+        { "Snare Snap Doctor",    "Snare",  2, 50, 70, 40, 55, 55, 25, 75, 30,  0 },
+        { "Fat Snare Body",       "Snare",  2, 45, 50, 75, 45, 35, 20, 45, 45,  5 },
+        { "Crisp Snare Air",      "Snare",  2, 45, 55, 30, 60, 75, 30, 60, 20,  0 },
+        { "Clap Sheen",           "Clap",   3, 40, 45, 25, 58, 70, 40, 55, 25,  0 },
+        { "Wide Clap Room",       "Clap",   3, 40, 35, 35, 52, 55, 70, 40, 30,  0 },
+        { "Bass Focus Clean",     "Bass",   5, 55, 35, 60, 45, 10,  0, 30, 25, 30 },
+        { "Warm Bass Body",       "Bass",   5, 50, 25, 75, 40,  8,  0, 20, 50, 40 },
+        { "Hat Polish",           "Hat",    6, 40, 40, 10, 62, 70, 35, 55, 15,  0 },
+        { "Crisp Hat Air",        "Hat",    6, 45, 50,  5, 68, 85, 45, 65, 10,  0 },
+        { "Perc Presence",        "Percussion", 7, 45, 55, 30, 58, 55, 45, 60, 25,  0 },
+        { "Loop Glue Fast",       "Loop",   8, 50, 45, 50, 50, 40, 30, 50, 40, 15 },
+        { "Loop Tape Warmth",     "Loop",   8, 45, 30, 65, 42, 25, 25, 35, 65, 20 },
+        { "Loop Wide & Bright",   "Loop",   8, 45, 40, 40, 60, 65, 75, 45, 30, 10 },
+        { "Melody Space",         "Melody", 9, 45, 30, 45, 52, 55, 65, 35, 25,  0 },
+        { "Melody Presence",      "Melody", 9, 50, 45, 50, 58, 60, 35, 55, 35,  5 },
+        { "Vocal Clarity Rescue", "Vocal", 10, 60, 40, 35, 60, 65, 15, 50, 20,  0 },
+        { "Vocal Warm Body",      "Vocal", 10, 50, 30, 70, 45, 40, 10, 35, 40,  0 },
+        { "Vocal Air & Sheen",    "Vocal", 10, 45, 35, 25, 58, 85, 25, 45, 15,  0 },
+        { "Flat Start",           "Utility", 0, 50,  0,  0, 50,  0,  0,  0,  0,  0 },
+        { "Gentle Enhance",       "Utility", 0, 40, 30, 30, 52, 30, 15, 30, 20, 10 },
+        { "Maximum Character",    "Utility", 0, 70, 75, 65, 58, 65, 40, 80, 70, 30 },
     };
 
     for (const auto& r : rows)
@@ -66,7 +66,7 @@ void PresetBank::buildFactoryBank()
             { pid::punch, r.punch },      { pid::body, r.body },
             { pid::tone, r.tone },        { pid::air, r.air },
             { pid::stereo, r.stereo },    { pid::transients, r.trans },
-            { pid::saturate, r.sat },
+            { pid::saturate, r.sat },     { pid::sub, r.sub },
         };
         presets.push_back (std::move (p));
     }

@@ -71,6 +71,11 @@ float AnalysisEngine::targetBandDb (int typeIndex, int band)
     return profileFor (typeIndex).target[juce::jlimit (0, kNumBands - 1, band)];
 }
 
+float AnalysisEngine::crestHighDb (int typeIndex)
+{
+    return profileFor (typeIndex).crestHi;
+}
+
 // =============================================================================
 //  Analysis
 // =============================================================================
@@ -465,6 +470,8 @@ AnalysisResult AnalysisEngine::analyse (const juce::AudioBuffer<float>& stereo,
                  (0.30f + 0.28f * juce::jmax (-1.0f, r.correlation)
                         + 0.42f * juce::jmax (-1.0f, r.lowCorrelation)) * 100.0f);
 
+    r.peakExcessDb = juce::jmax (0.0f, r.crestDb - profile.crestHi);
+
     // Fit: how the source sits against the mix target curve.
     {
         int sum = 0;
@@ -562,7 +569,7 @@ AnalysisResult AnalysisEngine::analyse (const juce::AudioBuffer<float>& stereo,
                                  Severity::medium, "gauge" });
         else if (r.crestDb > profile.crestHi + 2.0f)
             mediums.push_back ({ "Peaks Uncontrolled",
-                                 "Crest factor is high for this source.\nTame peaks to sit in the mix.",
+                                 "Peaks tower over the body.\nFix Source will tame them.",
                                  Severity::medium, "gauge" });
 
         if (r.level >= 80)

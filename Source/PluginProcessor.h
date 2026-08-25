@@ -38,6 +38,7 @@ namespace pid
     inline constexpr const char* stereo       = "stereo";
     inline constexpr const char* transients   = "transients";
     inline constexpr const char* saturate     = "saturate";
+    inline constexpr const char* sub          = "sub";
     inline constexpr const char* autoMatch    = "autoMatch";
     inline constexpr const char* hq           = "hq";
     inline constexpr const char* oversampling = "oversampling";

@@ -49,6 +49,10 @@ juce::AudioProcessorValueTreeState::ParameterLayout SourceGloProcessor::createLa
     layout.add (pct (ids::transients, "Transients", 65.0f));
     layout.add (pct (ids::saturate,   "Saturate",   35.0f));
 
+    // Added at RC on user feedback: the macro row had Air for the top and
+    // nothing for the bottom. Not in the pack's parameters.json - documented.
+    layout.add (pct (ids::sub,        "Sub",        0.0f));
+
     layout.add (std::make_unique<B> (juce::ParameterID { ids::autoMatch, 1 }, "Auto Match", true));
     layout.add (std::make_unique<B> (juce::ParameterID { ids::hq, 1 }, "HQ", true));
 
@@ -82,7 +86,7 @@ SourceGloProcessor::SourceGloProcessor()
     // dirty and the debounced re-analyzer refreshes it.
     for (const char* id : { pid::sourceType, pid::fixAmount, pid::punch, pid::body,
                             pid::tone, pid::air, pid::stereo, pid::transients,
-                            pid::saturate })
+                            pid::saturate, pid::sub })
         apvts.addParameterListener (id, this);
     reanalyzer = std::make_unique<Reanalyzer> (*this);
 }
@@ -92,7 +96,7 @@ SourceGloProcessor::~SourceGloProcessor()
     reanalyzer.reset();
     for (const char* id : { pid::sourceType, pid::fixAmount, pid::punch, pid::body,
                             pid::tone, pid::air, pid::stereo, pid::transients,
-                            pid::saturate })
+                            pid::saturate, pid::sub })
         apvts.removeParameterListener (id, this);
     library.changed.removeChangeListener (this);
     // A worker job captures a WeakReference, but the pool itself must not
@@ -212,6 +216,7 @@ void SourceGloProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::M
         macros.stereo     = pct (pid::stereo);
         macros.transients = pct (pid::transients);
         macros.saturate   = pct (pid::saturate);
+        macros.sub        = pct (pid::sub);
         macros.fixAmount  = pct (pid::fixAmount);
         macros.oversampling = (int) apvts.getRawParameterValue (pid::oversampling)->load();
         macros.hq         = apvts.getRawParameterValue (pid::hq)->load() > 0.5f;
@@ -368,6 +373,7 @@ void SourceGloProcessor::renderThroughChain (juce::AudioBuffer<float>& buffer,
     macros.stereo     = pct (pid::stereo);
     macros.transients = pct (pid::transients);
     macros.saturate   = pct (pid::saturate);
+    macros.sub        = pct (pid::sub);
     macros.fixAmount  = pct (pid::fixAmount);
     macros.oversampling = (int) apvts.getRawParameterValue (pid::oversampling)->load();
     macros.hq         = apvts.getRawParameterValue (pid::hq)->load() > 0.5f;
@@ -522,27 +528,52 @@ void SourceGloProcessor::requestFixSource()
         // Hearing the fix means being on the processed side of A/B.
         compareRaw.store (false);
 
-        // The chain is nonlinear (the saturator compresses less at lower
-        // drive), so a linear trim estimate undershoots on hot sources.
-        // Measure the engaged chain's actual true peak and tighten until the
-        // -1 dBTP ceiling really holds.
-        for (int iteration = 0; iteration < 3; ++iteration)
+        // The chain is nonlinear, so one-shot estimates undershoot twice
+        // over: the saturator compresses less at lower drive (true peak),
+        // and clipping the towers also removes the energy they carried
+        // (crest). Measure the engaged chain's actual output and adjust the
+        // trim and the peak taming until both targets really hold.
+        const int type = (int) apvts.getRawParameterValue (pid::sourceType)->load();
+        const float crestCeiling = AnalysisEngine::crestHighDb (type);
+
+        for (int iteration = 0; iteration < 4; ++iteration)
         {
             auto processed = makeProcessedSnapshot();
-            if (processed.getNumSamples() == 0)
+            const int n = processed.getNumSamples();
+            if (n == 0)
                 break;
 
             PolyphasePeakDetector tpL, tpR;
-            float tp = 0.0f;
+            float tp = 0.0f, peak = 0.0f;
+            double sumSq = 0.0;
             const float* l = processed.getReadPointer (0);
             const float* r = processed.getNumChannels() > 1 ? processed.getReadPointer (1) : l;
-            for (int i = 0; i < processed.getNumSamples(); ++i)
+            for (int i = 0; i < n; ++i)
+            {
                 tp = juce::jmax (tp, tpL.peakForSample (l[i]), tpR.peakForSample (r[i]));
+                const float m = 0.5f * (l[i] + r[i]);
+                peak = juce::jmax (peak, std::abs (l[i]), std::abs (r[i]));
+                sumSq += (double) m * m;
+            }
 
             const float tpDb = juce::Decibels::gainToDecibels (tp, -120.0f);
-            if (tpDb <= -0.5f)
+            const float crestDb = juce::Decibels::gainToDecibels (peak, -120.0f)
+                                - juce::Decibels::gainToDecibels (
+                                      (float) std::sqrt (sumSq / n), -120.0f);
+
+            bool settled = true;
+            if (fixChain.getFixState().clipDb > 0.0f && crestDb > crestCeiling + 1.0f)
+            {
+                fixChain.addClipDb (crestDb - (crestCeiling + 1.0f));
+                settled = false;
+            }
+            if (tpDb > -0.5f)
+            {
+                fixChain.addTrimDb (-(tpDb + 1.0f));
+                settled = false;
+            }
+            if (settled)
                 break;
-            fixChain.addTrimDb (-(tpDb + 1.0f));
         }
     }
 
@@ -575,6 +606,8 @@ void SourceGloProcessor::getStateInformation (juce::MemoryBlock& destData)
     state.setProperty ("fixEngaged", fixChain.isFixEngaged(), nullptr);
     state.setProperty ("fixBands", bands, nullptr);
     state.setProperty ("fixTrim", fix.trimDb, nullptr);
+    state.setProperty ("fixClip", fix.clipDb, nullptr);
+    state.setProperty ("fixPeak", fix.peakDb, nullptr);
     state.setProperty ("fixLowMono", fix.lowMono, nullptr);
     state.setProperty ("fixDc", fix.dcFilter, nullptr);
 
@@ -597,6 +630,8 @@ void SourceGloProcessor::setStateInformation (const void* data, int sizeInBytes)
             for (int b = 0; b < FixChain::numFixBands && b < bands.size(); ++b)
                 fix.bandGainDb[b] = bands[b].getFloatValue();
             fix.trimDb   = (float) (double) state.getProperty ("fixTrim", 0.0);
+            fix.clipDb   = (float) (double) state.getProperty ("fixClip", 0.0);
+            fix.peakDb   = (float) (double) state.getProperty ("fixPeak", -120.0);
             fix.lowMono  = (bool) state.getProperty ("fixLowMono", false);
             fix.dcFilter = (bool) state.getProperty ("fixDc", false);
             fixChain.setFixState (fix, (bool) state.getProperty ("fixEngaged", false));

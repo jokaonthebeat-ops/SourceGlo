@@ -10,7 +10,9 @@ namespace
     const float kFixFreq[FixChain::numFixBands] = { 45.0f, 150.0f, 700.0f, 3500.0f, 10000.0f };
 
     constexpr float kBodyHz = 180.0f, kTiltLowHz = 250.0f, kTiltHighHz = 2500.0f, kAirHz = 12000.0f;
+    constexpr float kSubHz = 60.0f;
     constexpr float kBodyRangeDb = 6.0f, kTiltRangeDb = 4.5f, kAirRangeDb = 6.0f;
+    constexpr float kSubRangeDb = 9.0f;
 
     float envelopeCoeff (double sr, float ms)
     {
@@ -25,9 +27,12 @@ void FixChain::prepare (double sampleRate, int maxBlockSize)
 
     for (auto& sm : fixBandSm) sm.reset (sr, 0.06);
     fixTrimSm.reset (sr, 0.06);
+    clipThreshSm.reset (sr, 0.06);
+    clipThreshSm.setCurrentAndTargetValue (10.0f);   // far above any peak
     bodySm.reset (sr, 0.05);
     toneSm.reset (sr, 0.05);
     airSm.reset (sr, 0.05);
+    subSm.reset (sr, 0.05);
     widthSm.reset (sr, 0.05);
     lowMonoSm.reset (sr, 0.06);
     chainMixSm.reset (sr, 0.05);
@@ -115,6 +120,11 @@ void FixChain::engageFix (const AnalysisResult& analysis)
                        ? juce::jlimit (-12.0f, 0.0f, -(predictedTp + 1.0f))
                        : 0.0f);
 
+    // Peak taming: absorb the crest excess with a soft clip hung just under
+    // the analysed peak. This is what turns "Peaks Uncontrolled" green.
+    fixClipDb.store (juce::jlimit (0.0f, 12.0f, analysis.peakExcessDb));
+    fixPeakDb.store (analysis.peakDb);
+
     fixLowMono.store (analysis.lowCorrelation < 0.5f);
     fixDc.store (analysis.dcOffset);
     fixEngaged.store (true);
@@ -130,12 +140,19 @@ void FixChain::addTrimDb (float delta) noexcept
     fixTrimDb.store (juce::jlimit (-12.0f, 0.0f, fixTrimDb.load() + delta));
 }
 
+void FixChain::addClipDb (float delta) noexcept
+{
+    fixClipDb.store (juce::jlimit (0.0f, 16.0f, fixClipDb.load() + delta));
+}
+
 FixChain::FixState FixChain::getFixState() const
 {
     FixState s;
     for (int b = 0; b < numFixBands; ++b)
         s.bandGainDb[b] = fixBandDb[b].load();
     s.trimDb   = fixTrimDb.load();
+    s.clipDb   = fixClipDb.load();
+    s.peakDb   = fixPeakDb.load();
     s.lowMono  = fixLowMono.load();
     s.dcFilter = fixDc.load();
     return s;
@@ -146,6 +163,8 @@ void FixChain::setFixState (const FixState& state, bool engaged)
     for (int b = 0; b < numFixBands; ++b)
         fixBandDb[b].store (state.bandGainDb[b]);
     fixTrimDb.store (state.trimDb);
+    fixClipDb.store (state.clipDb);
+    fixPeakDb.store (state.peakDb);
     fixLowMono.store (state.lowMono);
     fixDc.store (state.dcFilter);
     fixEngaged.store (engaged);
@@ -166,6 +185,7 @@ void FixChain::updateFilters (float fixAmount, const MacroValues& macros) noexce
     desired[numFixBands + 1] = -tilt;
     desired[numFixBands + 2] =  tilt;
     desired[numFixBands + 3] = airSm.getCurrentValue() * kAirRangeDb;
+    desired[numFixBands + 4] = subSm.getCurrentValue() * kSubRangeDb;
 
     juce::ignoreUnused (fixAmount, macros);
 
@@ -190,9 +210,11 @@ void FixChain::updateFilters (float fixAmount, const MacroValues& macros) noexce
             coeffs = juce::dsp::IIR::Coefficients<float>::makeLowShelf (sr, kTiltLowHz, 0.7f, gain);
         else if (f == numFixBands + 2)
             coeffs = juce::dsp::IIR::Coefficients<float>::makeHighShelf (sr, kTiltHighHz, 0.7f, gain);
-        else
+        else if (f == numFixBands + 3)
             coeffs = juce::dsp::IIR::Coefficients<float>::makeHighShelf (
                         sr, juce::jmin (kAirHz, (float) sr * 0.42f), 0.8f, gain);
+        else
+            coeffs = juce::dsp::IIR::Coefficients<float>::makeLowShelf (sr, kSubHz, 0.8f, gain);
 
         for (int ch = 0; ch < 2; ++ch)
             filters[ch][f].coefficients = coeffs;
@@ -232,10 +254,18 @@ void FixChain::process (juce::AudioBuffer<float>& buffer, const MacroValues& m) 
     // The headroom trim is a safety ceiling, not a flavour: it applies in
     // full whenever the fix is engaged, regardless of Fix Amount.
     fixTrimSm.setTargetValue (engaged ? fixTrimDb.load() : 0.0f);
+
+    // Peak-taming threshold, in the raw-input domain the analysis measured
+    // (the stage runs before the trim). Fix Amount scales how deep it bites.
+    const float clipAmount = engaged ? fixClipDb.load() * m.fixAmount : 0.0f;
+    clipThreshSm.setTargetValue (clipAmount > 0.1f
+                                   ? fixPeakDb.load() - clipAmount
+                                   : 10.0f);
     lowMonoSm.setTargetValue (engaged && fixLowMono.load() ? 1.0f : 0.0f);
     bodySm.setTargetValue (m.body);
     toneSm.setTargetValue (m.tone);
     airSm.setTargetValue (m.air);
+    subSm.setTargetValue (m.sub);
     widthSm.setTargetValue (m.stereo);
     chainMixSm.setTargetValue (m.compare ? 0.0f : 1.0f);
 
@@ -251,6 +281,7 @@ void FixChain::process (juce::AudioBuffer<float>& buffer, const MacroValues& m) 
     bodySm.skip (numSamples);
     toneSm.skip (numSamples);
     airSm.skip (numSamples);
+    subSm.skip (numSamples);
 
     const bool dcOn = engaged && fixDc.load();
     float* L = buffer.getWritePointer (0);
@@ -259,9 +290,20 @@ void FixChain::process (juce::AudioBuffer<float>& buffer, const MacroValues& m) 
     // --- trim + EQ + transient shaping, one pass ---------------------------
     for (int i = 0; i < numSamples; ++i)
     {
+        // Peak taming first, in the analysed domain: a soft clip that is
+        // transparent below the threshold and absorbs the crest excess above.
+        const float thresh = juce::Decibels::decibelsToGain (clipThreshSm.getNextValue());
+        float l = L[i];
+        float r = R[i];
+        if (thresh < 2.0f)
+        {
+            l = thresh * std::tanh (l / thresh);
+            r = thresh * std::tanh (r / thresh);
+        }
+
         const float trim = juce::Decibels::decibelsToGain (fixTrimSm.getNextValue());
-        float l = L[i] * trim;
-        float r = R[i] * trim;
+        l *= trim;
+        r *= trim;
 
         if (dcOn)
         {
