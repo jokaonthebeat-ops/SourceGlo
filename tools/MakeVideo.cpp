@@ -436,13 +436,18 @@ int main (int argc, char** argv)
                       p.requestFixSource();
                       p.analyzeNow();
                   }
-                  // Ride the amount so the correction is seen arriving.
+                  // Ride the amount so the correction is seen arriving, and
+                  // re-score along the way: analysis measures through the
+                  // chain, so the pods climb as the fix deepens.
                   if (progress > 0.35)
                   {
                       const float ride = (float) juce::jlimit (0.0, 1.0, (progress - 0.35) / 0.5);
                       setParam (p, pid::fixAmount, 20.0f + ride * 80.0f);
-                      if (progress > 0.8 && progress < 0.83)
-                          p.analyzeNow();
+
+                      static const double marks[] = { 0.52, 0.68, 0.86 };
+                      for (double mark : marks)
+                          if (progress > mark && progress < mark + 0.035)
+                              p.analyzeNow();
                   }
               } },
 
@@ -677,19 +682,22 @@ int main (int argc, char** argv)
                     g.setOpacity (1.0f);
                 }
 
-                // Logo opener: the mark rises, then the wordmark and tagline.
-                const float markAlpha = envelopeFor (t, 0.1, 4.4, 1.0, 0.7);
+                // Logo opener: the mark rises alone, then cross-dissolves into
+                // the full lockup. The wordmark asset ALREADY contains the
+                // mark, so drawing both at once reads as a duplicated logo -
+                // they must never overlap.
+                const float markAlpha = envelopeFor (t, 0.15, 2.5, 1.0, 0.55);
                 if (markAlpha > 0.01f)
-                    drawMark (g, markAlpha * 0.95f, 250.0f + 24.0f * markAlpha,
-                              { (float) videoWidth * 0.5f, 372.0f });
+                    drawMark (g, markAlpha * 0.95f, 270.0f + 26.0f * markAlpha,
+                              { (float) videoWidth * 0.5f, 500.0f });
 
-                const float introAlpha = envelopeFor (t, 0.55, 4.9, 1.1, 0.8);
+                const float introAlpha = envelopeFor (t, 2.25, 4.9, 0.85, 0.8);
                 if (introAlpha > 0.01f)
                 {
-                    drawLogo (g, introAlpha, 0.95f + 0.05f * introAlpha, 604.0f);
+                    drawLogo (g, introAlpha, 0.97f + 0.03f * introAlpha, 505.0f);
                     g.setColour (tokens::cyan.withAlpha (0.85f * introAlpha));
                     drawTracked (g, "PRODUCTION INTELLIGENCE FOR BETTER MIXES",
-                                 juce::Rectangle<float> (0.0f, 706.0f, (float) videoWidth, 44.0f),
+                                 juce::Rectangle<float> (0.0f, 640.0f, (float) videoWidth, 44.0f),
                                  Fonts::make (25.0f), 5.0f);
                 }
 
@@ -697,19 +705,17 @@ int main (int argc, char** argv)
                 const float outroAlpha = envelopeFor (t, 108.4, 116.0, 1.1, 1.2);
                 if (outroAlpha > 0.01f)
                 {
-                    drawMark (g, outroAlpha * 0.9f, 210.0f,
-                              { (float) videoWidth * 0.5f, 352.0f });
-                    drawLogo (g, outroAlpha, 1.0f, 566.0f);
+                    drawLogo (g, outroAlpha, 1.0f, 500.0f);
 
                     g.setColour (tokens::text.withAlpha (0.88f * outroAlpha));
                     // fromUTF8, not a bare literal: juce::String reads the middle
                     // dot's two UTF-8 bytes as Latin-1 and draws "Â·".
                     drawTracked (g, juce::String::fromUTF8 ("VST3  ·  AUDIO UNIT  ·  STANDALONE  ·  MACOS"),
-                                 juce::Rectangle<float> (0.0f, 662.0f, (float) videoWidth, 44.0f),
+                                 juce::Rectangle<float> (0.0f, 636.0f, (float) videoWidth, 44.0f),
                                  Fonts::make (24.0f), 4.0f);
                     g.setColour (tokens::gold.withAlpha (0.85f * outroAlpha));
                     drawTracked (g, "DIAMOND LOOPZ",
-                                 juce::Rectangle<float> (0.0f, 732.0f, (float) videoWidth, 40.0f),
+                                 juce::Rectangle<float> (0.0f, 706.0f, (float) videoWidth, 40.0f),
                                  Fonts::make (21.0f), 6.0f);
                 }
 
@@ -728,8 +734,8 @@ int main (int argc, char** argv)
             // A still per act, so a render can be reviewed without scrubbing -
             // and a bad overlay is caught here rather than after upload.
             {
-                static const std::array<double, 13> stillTimes
-                    { 2.4, 8.0, 16.0, 24.0, 33.0, 45.0, 56.0, 65.0, 74.0,
+                static const std::array<double, 14> stillTimes
+                    { 1.6, 3.6, 8.0, 16.0, 24.0, 33.0, 47.6, 56.0, 65.0, 74.0,
                       84.0, 93.0, 102.0, 112.0 };
                 for (double mark : stillTimes)
                     if (std::abs (t - mark) < 0.5 / fps)

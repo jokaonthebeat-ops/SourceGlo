@@ -118,7 +118,18 @@ juce::Image Assets::logoFull()
 
 juce::Image Assets::premiumMark (int px)
 {
-    return load ("Brand/sourceglo_premium_mark_" + juce::String (px) + ".png");
+    auto raw = load ("Brand/sourceglo_premium_mark_" + juce::String (px) + ".png");
+    if (! raw.isValid())
+        return raw;
+
+    // The supplied mark files are a bad crop of the full lockup: a sliver of
+    // the wordmark's "S" is baked into the right edge at every size (the
+    // mark's own ink ends at 90.3% of the width, the sliver starts at 97%).
+    // Trimming at 94% drops it with margin on both sides. Verified against
+    // the 256/512/1024 files - this is the art, not a load failure, so it is
+    // corrected here rather than by redrawing anything.
+    return raw.getClippedImage (raw.getBounds().withWidth (
+               juce::roundToInt (raw.getWidth() * 0.94f)));
 }
 
 // -----------------------------------------------------------------------------

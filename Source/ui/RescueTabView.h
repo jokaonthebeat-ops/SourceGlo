@@ -22,7 +22,7 @@ public:
         setTitle ("Rescue browser");
 
         matchList.setModel (this);
-        matchList.setRowHeight (34);
+        matchList.setRowHeight (32);
         matchList.setColour (juce::ListBox::backgroundColourId, tokens::bg1);
         matchList.setColour (juce::ListBox::outlineColourId, tokens::strokeSoft);
         matchList.setOutlineThickness (1);
@@ -113,13 +113,13 @@ public:
         g.setFont (Fonts::make (10.0f));
         g.drawText (juce::String (rowIndex + 1), 6, 0, 18, height, juce::Justification::centred);
 
-        g.setFont (Fonts::rescueTitle().withHeight (13.0f));
+        g.setFont (Fonts::rescueTitle().withHeight (12.5f));
         g.setColour (tokens::white);
-        g.drawText (m.fileName, 30, 3, 200, 15, juce::Justification::centredLeft);
+        g.drawText (m.fileName, 30, 2, 200, 15, juce::Justification::centredLeft);
         g.setFont (Fonts::rescueTag());
         g.setColour (tokens::muted);
         g.drawText (m.tagA + juce::String (juce::CharPointer_UTF8 (" \xc2\xb7 ")) + m.tagB,
-                    30, 18, 200, 12, juce::Justification::centredLeft);
+                    30, 17, 200, 12, juce::Justification::centredLeft);
 
         if (m.favourite)
             if (auto* star = Assets::icon ("star", tokens::gold))
