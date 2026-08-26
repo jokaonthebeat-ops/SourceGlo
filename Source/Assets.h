@@ -33,6 +33,7 @@ struct Assets
     // pick the export closest above the current physical scale.
     static juce::Image logoHeader (float scale);
     static juce::Image premiumMark (int px); // 256 / 512 / 1024
+    static juce::Image logoFull();           // the full wordmark, for video/print
 
     // --- HUD --------------------------------------------------------------
     static juce::Image scoreRingBase();  // 1024 sq

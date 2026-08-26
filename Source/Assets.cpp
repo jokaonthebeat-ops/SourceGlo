@@ -110,6 +110,12 @@ juce::Image Assets::logoHeader (float scale)
     return x1;
 }
 
+juce::Image Assets::logoFull()
+{
+    static const juce::Image full = load ("Brand/sourceglo_pro_premium_logo_2048w.png");
+    return full;
+}
+
 juce::Image Assets::premiumMark (int px)
 {
     return load ("Brand/sourceglo_premium_mark_" + juce::String (px) + ".png");

@@ -217,7 +217,7 @@ CONFIG_STAMP := $(DIST)/.config-$(CONFIG_TAG)
 # -----------------------------------------------------------------------------
 
 .PHONY: all vst3 au standalone install universal clean distclean release \
-        juceobjs syntax uishot dsptest test sanitize installer notarize icon video reel assets
+        juceobjs syntax uishot dsptest test sanitize installer notarize icon video video reel assets
 
 all: vst3 au standalone
 
@@ -440,6 +440,33 @@ $(TOOLS)/uishot: $(PLUG_OBJS) $(ROOT)/tools/UIShot.cpp $(ROOT)/JucePluginDefines
 uishot: $(TOOLS)/uishot
 	@cd $(BUILD) && $(TOOLS)/uishot $(ARGS)
 
+# -----------------------------------------------------------------------------
+#  The demo film. Every frame is the real editor rendering real analysis; the
+#  Analyze presses, the Fix Source engagement and the macro moves are a scripted
+#  timeline applied to the actual plugin.
+#
+#    make video                        silent (a generated drum bed drives it)
+#    make video ARGS="loop.wav"        real audio in, processed output as the
+#                                      soundtrack
+# -----------------------------------------------------------------------------
+$(TOOLS)/makevideo: $(PLUG_OBJS) $(ROOT)/tools/MakeVideo.cpp $(ROOT)/JucePluginDefines.h
+	@mkdir -p $(TOOLS)
+	@echo "  CXX [tools]      MakeVideo.cpp"
+	@$(CXX) $(CXXFLAGS) -DJUCE_STANDALONE_APPLICATION=0 -DJucePlugin_Build_Standalone=0 \
+	   -c $(ROOT)/tools/MakeVideo.cpp -o $(TOOLS)/MakeVideo.o
+	@$(CXX) $(PLUG_OBJS) $(TOOLS)/MakeVideo.o $(LDFLAGS_BASE) \
+	   -framework CoreVideo -framework CoreMedia -framework VideoToolbox -o $@
+
+video: $(TOOLS)/makevideo
+	@mkdir -p $(ROOT)/marketing
+	@cd $(ROOT)/marketing && $(TOOLS)/makevideo SourceGloPro-demo.mp4 $(ARGS)
+
+# The same film at a web bitrate, for upload.
+.PHONY: video-web
+video-web: $(TOOLS)/makevideo
+	@mkdir -p $(ROOT)/marketing
+	@cd $(ROOT)/marketing && $(TOOLS)/makevideo SourceGloPro-demo-web.mp4 "" 0 5
+
 $(TOOLS)/dsptest: $(PLUG_OBJS) $(ROOT)/tools/DspTest.cpp $(ROOT)/JucePluginDefines.h
 	@mkdir -p $(TOOLS)
 	@echo "  CXX [tools]      DspTest.cpp"
@@ -465,33 +492,6 @@ icon: $(TOOLS)/makeicon
 	@iconutil -c icns $(BUILD)/SourceGloPro.iconset -o $(ROOT)/packaging/SourceGloPro.icns
 	@echo "  ICNS             packaging/SourceGloPro.icns ($$(du -h $(ROOT)/packaging/SourceGloPro.icns | cut -f1), layout=$(LAYOUT))"
 
-# Encodes straight to H.264 via AVFoundation. There is no ffmpeg on this machine
-# and no package manager to install one, but AVFoundation is already linked.
-$(TOOLS)/makevideo: $(PLUG_OBJS) $(ROOT)/tools/MakeVideo.cpp $(ROOT)/JucePluginDefines.h
-	@mkdir -p $(TOOLS)
-	@echo "  CXX [tools]      MakeVideo.cpp"
-	@$(CXX) $(CXXFLAGS) -DJUCE_STANDALONE_APPLICATION=0 -DJucePlugin_Build_Standalone=0 \
-	   -c $(ROOT)/tools/MakeVideo.cpp -o $(TOOLS)/MakeVideo.o
-	@$(CXX) $(PLUG_OBJS) $(TOOLS)/MakeVideo.o $(LDFLAGS_BASE) \
-	   -framework CoreVideo -framework CoreMedia -o $@
-
-# Source material for the demo. Passed as separate quoted variables rather than
-# folded into ARGS, because ARGS is word-split by the shell and real stem paths
-# have spaces in them:
-#
-#   make video BEAT="~/Music/My Beat.wav" VOX="~/Music/My Vocal.wav"
-#
-# A '#' in a path still breaks this - make starts a comment there even inside a
-# command-line assignment. Symlink such files to a plain name first.
-BEAT ?=
-VOX  ?=
-
-video: $(TOOLS)/makevideo
-	@mkdir -p $(ROOT)/marketing
-	@cd $(ROOT)/marketing && $(TOOLS)/makevideo \
-	   $(if $(ARGS),$(ARGS),SourceGlo-Pro-Demo.mp4 30) \
-	   $(if $(BEAT),"$(BEAT)") $(if $(VOX),"$(VOX)")
-
 # Same film, 9:16, for Reels / Shorts / TikTok.
 # Validates the PNGs at the container level rather than through a decoder.
 # macOS ImageIO accepts a truncated IDAT and says nothing; Windows libpng
@@ -499,11 +499,8 @@ video: $(TOOLS)/makevideo
 assets:
 	@python3 $(ROOT)/tools/check-assets.py $(ROOT)/Assets
 
-reel: $(TOOLS)/makevideo
-	@mkdir -p $(ROOT)/marketing
-	@cd $(ROOT)/marketing && $(TOOLS)/makevideo \
-	   $(if $(ARGS),$(ARGS),SourceGlo-Pro-Reel.mp4 30) --vertical \
-	   $(if $(BEAT),"$(BEAT)") $(if $(VOX),"$(VOX)")
+# The vertical cut is not built yet - the landscape film is the deliverable.
+# Left out deliberately rather than shipping a target that renders nothing.
 
 $(TOOLS)/vst3probe: $(ROOT)/tools/VST3Probe.cpp
 	@mkdir -p $(TOOLS)
