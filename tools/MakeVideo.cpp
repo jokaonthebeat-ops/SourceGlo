@@ -222,6 +222,98 @@ private:
     float hatState = 0.0f, airL = 0.0f, airR = 0.0f;
 };
 
+// --- narration ---------------------------------------------------------------
+
+/*
+    Optional voice-over. build/vo/act-N.wav (48 kHz mono, produced by
+    tools/make-narration.sh) is mixed in at act N's start, and the music is
+    ducked underneath it. Missing files simply mean no narration - the film
+    is complete without it.
+*/
+struct Narration
+{
+    struct Line { int act; juce::AudioBuffer<float> audio; };
+    std::vector<Line> lines;
+    double sr = 48000.0;
+
+    void load (const juce::File& dir, double sampleRate)
+    {
+        sr = sampleRate;
+        juce::AudioFormatManager fm;
+        fm.registerBasicFormats();
+
+        for (int act = 1; act <= 12; ++act)
+        {
+            auto file = dir.getChildFile ("act-" + juce::String (act) + ".wav");
+            if (! file.existsAsFile())
+                continue;
+            std::unique_ptr<juce::AudioFormatReader> reader (fm.createReaderFor (file));
+            if (reader == nullptr || reader->lengthInSamples < 16)
+                continue;
+
+            // Resample by linear interpolation if the clip is not at the
+            // film's rate - narration is speech, so this is inaudible.
+            const double ratio = reader->sampleRate / sr;
+            const int outLen = (int) std::llround ((double) reader->lengthInSamples / ratio);
+            juce::AudioBuffer<float> raw ((int) reader->numChannels,
+                                          (int) reader->lengthInSamples);
+            reader->read (&raw, 0, (int) reader->lengthInSamples, 0, true, true);
+
+            Line line;
+            line.act = act;
+            line.audio.setSize (1, outLen);
+            for (int i = 0; i < outLen; ++i)
+            {
+                const double pos = i * ratio;
+                const int i0 = (int) pos;
+                const int i1 = juce::jmin (i0 + 1, raw.getNumSamples() - 1);
+                const float frac = (float) (pos - i0);
+                float v = 0.0f;
+                for (int ch = 0; ch < raw.getNumChannels(); ++ch)
+                    v += raw.getSample (ch, i0) + frac * (raw.getSample (ch, i1)
+                                                            - raw.getSample (ch, i0));
+                line.audio.setSample (0, i, v / (float) juce::jmax (1, raw.getNumChannels()));
+            }
+            lines.push_back (std::move (line));
+        }
+    }
+
+    bool empty() const  { return lines.empty(); }
+
+    // Mixes into `block` for the film time starting at `t`. Returns the music
+    // duck gain (1 = untouched) so the caller can hold the beat back.
+    float mixInto (juce::AudioBuffer<float>& block, double t,
+                   const std::vector<double>& actStarts)
+    {
+        float duck = 1.0f;
+        const int n = block.getNumSamples();
+
+        for (const auto& line : lines)
+        {
+            if (line.act - 1 >= (int) actStarts.size())
+                continue;
+            const double start = actStarts[(size_t) (line.act - 1)] + 0.45;   // let the title land
+            const double offset = t - start;
+            const int len = line.audio.getNumSamples();
+            if (offset < -0.2 || offset * sr > len)
+                continue;
+
+            for (int i = 0; i < n; ++i)
+            {
+                const juce::int64 idx = (juce::int64) std::llround ((offset + i / sr) * sr);
+                if (idx < 0 || idx >= len)
+                    continue;
+                const float v = line.audio.getSample (0, (int) idx) * 1.25f;
+                block.addSample (0, i, v);
+                if (block.getNumChannels() > 1)
+                    block.addSample (1, i, v);
+            }
+            duck = 0.42f;      // about -7.5 dB under the voice
+        }
+        return duck;
+    }
+};
+
 // --- overlay drawing ---------------------------------------------------------
 
 static void drawBackdrop (juce::Graphics& g)
@@ -523,15 +615,25 @@ int main (int argc, char** argv)
             { 5.5, 11.0, "Know before you build",
               "Your mix is only as good as what you feed it", nullptr },
 
-            { 11.0, 20.0, "Analyze",
+            // The source-type menu opens on screen, then the real Analyze
+            // button is pressed - a rendered film has no mouse, so the press
+            // is driven through the control itself rather than the command.
+            { 11.0, 22.0, "Analyze",
               "Pick the source type, play it, press Analyze",
-              [] (SourceGloProcessor& p, SourceGloEditor&, double progress)
+              [] (SourceGloProcessor& p, SourceGloEditor& e, double progress)
               {
-                  if (progress > 0.45 && ! p.getAnalysis().analyzed)
+                  if (progress > 0.10 && progress < 0.13)  e.openSourceTypeMenu();
+                  if (progress > 0.40 && progress < 0.43)  e.dismissMenus();
+
+                  if (progress > 0.55 && progress < 0.60)  e.demoPress (0, true);
+                  if (progress > 0.60 && progress < 0.63)
+                  {
+                      e.demoPress (0, false);
                       p.analyzeNow();
+                  }
               } },
 
-            { 20.0, 28.5, "Source Score",
+            { 22.0, 28.5, "Source Score",
               juce::String::fromUTF8 ("Tone · Punch · Level · Phase · Fit — five pods, one number"),
               nullptr },
 
@@ -540,11 +642,12 @@ int main (int argc, char** argv)
 
             { 37.0, 49.0, "Fix Source",
               "One button applies the correction the analysis computed",
-              [] (SourceGloProcessor& p, SourceGloEditor&, double progress)
+              [] (SourceGloProcessor& p, SourceGloEditor& e, double progress)
               {
-                  if (! p.isFixEngaged() && progress > 0.15)
+                  if (progress > 0.10 && progress < 0.14)  e.demoPress (1, true);
+                  if (! p.isFixEngaged() && progress > 0.14 && progress < 0.18)
                   {
-                      p.requestFixSource();
+                      e.demoPress (1, false);
                       p.analyzeNow();
                   }
                   // Ride the amount so the correction is seen arriving, and
@@ -624,17 +727,25 @@ int main (int argc, char** argv)
                   e.showAnalysisTab (4);
               } },
 
-            { 97.0, 108.0, "Presets",
+            { 97.0, 110.0, "Presets",
               "29 factory presets by source type, and your own",
               [] (SourceGloProcessor& p, SourceGloEditor& e, double progress)
               {
                   e.showAnalysisTab (0);
 
+                  // The browser itself is on screen for the first third, so
+                  // the library is visible rather than merely described.
+                  if (progress > 0.05 && progress < 0.08)  e.openPresetBrowser();
+                  if (progress > 0.34 && progress < 0.37)  e.dismissMenus();
+                  if (progress < 0.37)
+                      return;
+
                   static const char* names[] = { "Loop Tape Warmth", "Deep 808 Control",
                                                  "Loop Wide & Bright", "Vocal Clarity Rescue",
                                                  "Punchy Kick Starter" };
                   const int count = (int) (sizeof (names) / sizeof (names[0]));
-                  const int index = juce::jlimit (0, count - 1, (int) (progress * count));
+                  const double span = juce::jlimit (0.0, 1.0, (progress - 0.37) / 0.63);
+                  const int index = juce::jlimit (0, count - 1, (int) (span * count));
 
                   static int lastIndex = -1;
                   if (index != lastIndex)
@@ -645,7 +756,7 @@ int main (int argc, char** argv)
                   }
               } },
 
-            { 108.0, 116.0, {}, {}, nullptr },      // logo closer
+            { 110.0, 118.0, {}, {}, nullptr },      // logo closer
         };
 
         // A reel earns attention in the first second or loses it: six acts in
@@ -663,10 +774,14 @@ int main (int argc, char** argv)
 
             { 3.4, 10.5, "Score any source",
               "0-100 against a modern pro standard",
-              [] (SourceGloProcessor& p, SourceGloEditor&, double progress)
+              [] (SourceGloProcessor& p, SourceGloEditor& e, double progress)
               {
-                  if (progress > 0.35 && ! p.getAnalysis().analyzed)
+                  if (progress > 0.28 && progress < 0.33)  e.demoPress (0, true);
+                  if (progress > 0.33 && progress < 0.37)
+                  {
+                      e.demoPress (0, false);
                       p.analyzeNow();
+                  }
               },
               { 560.0f, 78.0f, 500.0f, 420.0f } },       // the score ring
 
@@ -677,11 +792,12 @@ int main (int argc, char** argv)
 
             { 17.5, 26.5, "One button fixes it",
               "The correction the analysis computed, scaled to taste",
-              [] (SourceGloProcessor& p, SourceGloEditor&, double progress)
+              [] (SourceGloProcessor& p, SourceGloEditor& e, double progress)
               {
-                  if (! p.isFixEngaged() && progress > 0.12)
+                  if (progress > 0.08 && progress < 0.12)  e.demoPress (1, true);
+                  if (! p.isFixEngaged() && progress > 0.12 && progress < 0.16)
                   {
-                      p.requestFixSource();
+                      e.demoPress (1, false);
                       p.analyzeNow();
                   }
                   if (progress > 0.3)
@@ -816,8 +932,19 @@ int main (int argc, char** argv)
             }
         }
 
+        Narration narration;
+        narration.load (juce::File::getCurrentWorkingDirectory()
+                          .getSiblingFile ("build").getChildFile ("vo"), sr);
+        std::vector<double> actStarts;
+        for (const auto& seg : script)
+            actStarts.push_back (seg.start);
+        if (! narration.empty())
+            std::printf ("narration: %d lines\n", (int) narration.lines.size());
+
         juce::Image frame (juce::Image::ARGB, videoWidth, videoHeight, true);
         juce::Image panel (juce::Image::ARGB, panelWidth, panelHeight, true);
+
+        float duckGain = 1.0f;
 
         std::printf ("rendering %d frames (%.0f seconds) at %dx%d\n",
                      totalFrames, duration, videoWidth, videoHeight);
@@ -849,10 +976,38 @@ int main (int argc, char** argv)
 
             processor.processBlock (audio, midi);
 
+            // Popup menus are asynchronous, and this render has no message
+            // loop, so showMenuAsync would never get to build its component
+            // and the film would show nothing where a menu should be.
+            // MessageManager::runDispatchLoopUntil is compiled out of plugin
+            // builds (JUCE_MODAL_LOOPS_PERMITTED=0), so the CFRunLoop that
+            // backs the queue on macOS is pumped directly instead.
+            CFRunLoopRunInMode (kCFRunLoopDefaultMode, 0.004, false);
+
             // The soundtrack is the PROCESSED output: what the plugin did to
-            // the audio the viewer is watching it analyse.
+            // the audio the viewer is watching it analyse - with the voice
+            // over the top and the music ducked under it.
             if (audioWriter != nullptr)
-                audioWriter->writeFromAudioSampleBuffer (audio, 0, blockSize);
+            {
+                juce::AudioBuffer<float> mixed (2, blockSize);
+                for (int ch = 0; ch < 2; ++ch)
+                    mixed.copyFrom (ch, 0, audio, juce::jmin (ch, audio.getNumChannels() - 1),
+                                    0, blockSize);
+
+                if (! narration.empty())
+                {
+                    juce::AudioBuffer<float> voice (2, blockSize);
+                    voice.clear();
+                    const float duck = narration.mixInto (voice, t, actStarts);
+
+                    duckGain = duckGain + 0.06f * (duck - duckGain);   // smooth
+                    mixed.applyGain (duckGain);
+                    for (int ch = 0; ch < 2; ++ch)
+                        mixed.addFrom (ch, 0, voice, ch, 0, blockSize);
+                }
+
+                audioWriter->writeFromAudioSampleBuffer (mixed, 0, blockSize);
+            }
             editor->refreshDisplays();
 
             // --- compose -------------------------------------------------------
@@ -861,7 +1016,7 @@ int main (int argc, char** argv)
                 drawBackdrop (g);
 
                 const float panelAlpha = reelMode ? envelopeFor (t, 2.9, 44.4, 0.9, 0.8)
-                                                  : envelopeFor (t, 4.6, 109.0, 1.2, 1.0);
+                                                  : envelopeFor (t, 4.6, 111.0, 1.2, 1.0);
 
                 if (panelAlpha > 0.01f)
                 {
@@ -938,7 +1093,7 @@ int main (int argc, char** argv)
 
                 // Logo closer.
                 const float outroAlpha = reelMode ? envelopeFor (t, 43.8, 51.0, 0.9, 1.0)
-                                                  : envelopeFor (t, 108.4, 116.0, 1.1, 1.2);
+                                                  : envelopeFor (t, 110.4, 118.0, 1.1, 1.2);
                 if (outroAlpha > 0.01f)
                 {
                     drawLogo (g, outroAlpha, 1.0f, centreY);
@@ -981,9 +1136,9 @@ int main (int argc, char** argv)
             // A still per act, so a render can be reviewed without scrubbing -
             // and a bad overlay is caught here rather than after upload.
             {
-                static const std::array<double, 14> filmStills
-                    { 1.6, 3.6, 8.0, 16.0, 24.0, 33.0, 47.6, 56.0, 65.0, 74.0,
-                      84.0, 93.0, 102.0, 112.0 };
+                static const std::array<double, 15> filmStills
+                    { 1.6, 3.6, 8.0, 13.5, 19.0, 26.0, 33.0, 47.6, 56.0, 65.0,
+                      74.0, 84.0, 99.0, 106.0, 114.0 };
                 static const std::array<double, 8> reelStills
                     { 1.2, 2.8, 7.0, 14.0, 24.0, 31.0, 40.0, 47.5 };
 

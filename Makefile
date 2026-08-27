@@ -449,6 +449,14 @@ uishot: $(TOOLS)/uishot
 #    make video ARGS="loop.wav"        real audio in, processed output as the
 #                                      soundtrack
 # -----------------------------------------------------------------------------
+$(TOOLS)/makevoice: $(PLUG_OBJS) $(ROOT)/tools/MakeVoice.cpp
+	@mkdir -p $(TOOLS)
+	@echo "  CXX [tools]      MakeVoice.cpp"
+	@$(CXX) $(CXXFLAGS) -DJUCE_STANDALONE_APPLICATION=0 -DJucePlugin_Build_Standalone=0 \
+	   -c $(ROOT)/tools/MakeVoice.cpp -o $(TOOLS)/MakeVoice.o
+	@$(CXX) $(PLUG_OBJS) $(TOOLS)/MakeVoice.o $(LDFLAGS_BASE) \
+	   -framework AVFoundation -framework CoreMedia -o $@
+
 $(TOOLS)/makevideo: $(PLUG_OBJS) $(ROOT)/tools/MakeVideo.cpp $(ROOT)/JucePluginDefines.h
 	@mkdir -p $(TOOLS)
 	@echo "  CXX [tools]      MakeVideo.cpp"

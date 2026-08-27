@@ -66,6 +66,9 @@ public:
         processor.analysisChanged.removeChangeListener (this);
     }
 
+    // Headless tools: open the real source-type menu for the film.
+    void openTypeMenu()   { typeDropdown.openMenu(); }
+
     void resized() override
     {
         typeDropdown.setBounds   (14,  91, 205, 32);

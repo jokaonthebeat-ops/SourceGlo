@@ -40,6 +40,14 @@ public:
     // Headless tools: switch the lower panel's tab for a screenshot.
     void showAnalysisTab (int index);
 
+    // Headless tools: drive the real controls so a rendered film shows the
+    // presses and menus a viewer would see, rather than state changing by
+    // itself. 0 = Analyze, 1 = Fix Source.
+    void demoPress (int which, bool down);
+    void openPresetBrowser();
+    void openSourceTypeMenu();
+    void dismissMenus();
+
 private:
     class ContentComponent;
     class DebugOverlay;

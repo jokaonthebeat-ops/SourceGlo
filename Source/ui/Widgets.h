@@ -50,10 +50,17 @@ public:
                                              : sourceglo::ButtonState::normal;
 
         auto art = Assets::button (kind, state);
-        const auto r = getLocalBounds().toFloat();
+
+        // A pressed button should move. Without this the only feedback is a
+        // 2 dB art swap, which reads as nothing at all on screen or on video.
+        // The face sinks slightly and shifts a pixel down; the glow stays put
+        // so a latched button does not appear to jump.
+        const bool pressed = (down || forcedPress) && isEnabled();
+        const auto full = getLocalBounds().toFloat();
+        const auto r = pressed ? full.reduced (1.6f).translated (0.0f, 1.0f) : full;
 
         if (latched)
-            drawLatchedGlow (g, r);
+            drawLatchedGlow (g, full);
 
         if (art.isValid())
             g.drawImage (art, r, juce::RectanglePlacement::stretchToFit);
@@ -66,6 +73,8 @@ public:
         }
 
         auto content = getLocalBounds();
+        if (pressed)
+            content.translate (0, 1);
         const auto font = Fonts::buttonLabel().withHeight (fontHeight);
         const int textW = label.isNotEmpty()
                             ? (int) std::ceil (juce::GlyphArrangement::getStringWidth (font, label)) : 0;
@@ -100,6 +109,20 @@ public:
             g.setColour (latchColour().withAlpha (0.9f));
             g.drawRoundedRectangle (r.reduced (1.5f), 7.0f, 1.6f);
         }
+
+        if (pressed)
+        {
+            // A short shadow across the top edge sells the depression.
+            g.setColour (juce::Colours::black.withAlpha (0.28f));
+            g.fillRoundedRectangle (r.withHeight (5.0f), 4.0f);
+        }
+    }
+
+    // Headless tools drive the press visual directly: a rendered film has no
+    // mouse, so without this the demo's Analyze and Fix presses were invisible.
+    void setPressedVisual (bool p)
+    {
+        if (forcedPress != p) { forcedPress = p; repaint(); }
     }
 
     // Public so a subclass can pulse it (see FixSourceButton).
@@ -143,6 +166,7 @@ protected:
 
 private:
     float glowIntensity = 0.0f;
+    bool forcedPress = false;
     ButtonKind kind;
     juce::String label, iconName;
     juce::Colour iconTint  = tokens::cyan;
@@ -414,14 +438,20 @@ public:
         repaint();
     }
 
-    void mouseDown (const juce::MouseEvent&) override
+    void mouseDown (const juce::MouseEvent&) override   { openMenu(); }
+
+    void openMenu()
     {
         juce::PopupMenu m;
         m.setLookAndFeel (&getLookAndFeel());
         for (int i = 0; i < items.size(); ++i)
             m.addItem (i + 1, items[i], true, i == index);
 
+        // Hosted inside the editor: a plugin menu that opens as its own
+        // desktop window lands outside the plugin in fullscreen DAWs, and is
+        // invisible to an offline render of the editor.
         m.showMenuAsync (juce::PopupMenu::Options()
+                             .withParentComponent (getTopLevelComponent())
                             .withTargetComponent (this)
                             .withMinimumWidth (getWidth()),
                          [safe = juce::Component::SafePointer<AssetDropdown> (this)] (int result)

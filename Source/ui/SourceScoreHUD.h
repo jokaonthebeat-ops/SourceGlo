@@ -136,6 +136,18 @@ public:
         processor.analysisChanged.removeChangeListener (this);
     }
 
+    // Headless tools: show a press on the real control, then fire its action.
+    void demoPress (int which, bool downNow)
+    {
+        auto& b = which == 0 ? analyzeButton : (AssetButton&) fixButton;
+        b.setPressedVisual (downNow);
+        if (! downNow)
+        {
+            if (which == 0) processor.requestAnalyze();
+            else if (fixButton.isEnabled()) fixButton.onClick();
+        }
+    }
+
     void resized() override
     {
         // Mockup-measured: the reference draws the action row ~15-25 px right

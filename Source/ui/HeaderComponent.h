@@ -79,6 +79,9 @@ public:
         processor.getPresets().changed.removeChangeListener (this);
     }
 
+    // Headless tools: open the real preset browser for the film.
+    void openPresetBrowser()  { showPresetMenu(); }
+
     void mouseDown (const juce::MouseEvent& e) override
     {
         if (juce::Rectangle<int> (784, 14, 222, 40).contains (e.getPosition()))
@@ -172,6 +175,7 @@ private:
         }
 
         menu.showMenuAsync (juce::PopupMenu::Options()
+                              .withParentComponent (getTopLevelComponent())
                               .withTargetScreenArea (localAreaToGlobal (
                                   juce::Rectangle<int> (784, 14, 222, 40))),
                             [safe = juce::Component::SafePointer<HeaderComponent> (this)] (int r)
@@ -217,6 +221,7 @@ private:
                        std::abs (currentScale - (float) s / 100.0f) < 0.02f);
 
         m.showMenuAsync (juce::PopupMenu::Options()
+                             .withParentComponent (getTopLevelComponent())
                             .withTargetComponent (&settingsButton),
                          [safe = juce::Component::SafePointer<HeaderComponent> (this)] (int r)
                          {

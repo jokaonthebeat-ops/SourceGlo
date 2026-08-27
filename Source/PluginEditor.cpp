@@ -230,6 +230,26 @@ void SourceGloEditor::showAnalysisTab (int index)
     content->analysisTabs.selectTab (index);
 }
 
+void SourceGloEditor::demoPress (int which, bool down)
+{
+    content->hud.demoPress (which, down);
+}
+
+void SourceGloEditor::openPresetBrowser()
+{
+    content->header.openPresetBrowser();
+}
+
+void SourceGloEditor::openSourceTypeMenu()
+{
+    content->sourcePanel.openTypeMenu();
+}
+
+void SourceGloEditor::dismissMenus()
+{
+    juce::PopupMenu::dismissAllActiveMenus();
+}
+
 void SourceGloEditor::refreshDisplays()
 {
     headlessRefreshMode() = true;
