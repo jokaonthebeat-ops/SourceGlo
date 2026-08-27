@@ -52,9 +52,10 @@ void RescueLibrary::addFolder (const juce::File& folder)
         return;
     {
         const juce::ScopedLock sl (lock);
-        if (folders.contains (folder.getFullPathName()))
-            return;
-        folders.add (folder.getFullPathName());
+        // A folder already in the list still gets a rescan: samples added to
+        // it since the last pass are exactly why someone re-adds it.
+        if (! folders.contains (folder.getFullPathName()))
+            folders.add (folder.getFullPathName());
     }
     rescan();
 }

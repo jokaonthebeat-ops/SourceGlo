@@ -208,6 +208,15 @@ private:
         {
             statsTick = 0;
 
+            // The dropdown pushes changes to the parameter but must also
+            // follow it: presets, host automation and undo all move it, and
+            // reading it once at construction left the control showing a
+            // source type the plugin was not using.
+            const int typeNow = (int) processor.getAPVTS()
+                                    .getRawParameterValue (pid::sourceType)->load();
+            if (typeNow != typeDropdown.getSelectedIndex())
+                typeDropdown.setSelectedIndex (typeNow, juce::dontSendNotification);
+
             // Live stat hold: capture the loudest recent values, decay slowly
             // so the readout is legible rather than flickering per block.
             const float peakNow = juce::Decibels::gainToDecibels (

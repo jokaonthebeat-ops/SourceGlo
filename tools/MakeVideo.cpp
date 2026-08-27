@@ -37,13 +37,72 @@
 using namespace sourceglo;
 
 static constexpr int fps = 30;
-static constexpr int videoWidth = 1920;
-static constexpr int videoHeight = 1080;
+
+// Set at startup: 1920x1080 for the landscape film, 1080x1920 for the reel.
+static int videoWidth = 1920;
+static int videoHeight = 1080;
+static bool reelMode = false;
 
 // The editor renders at its native design canvas and is downscaled into the
 // frame - crisper than rendering small, and the aspect never has to be guessed.
 static constexpr int panelWidth = 1491;
 static constexpr int panelHeight = 1055;
+
+/*
+    Reel layout. A 1.41:1 panel fitted to 1080 wide is only 764 of 1920 pixels
+    tall, so a single centred panel would leave most of the frame empty.
+    The panel stays on screen the whole time at the top, and the act's own
+    region is blown up underneath - every pixel carries real interface.
+*/
+namespace reel
+{
+    inline constexpr float logoY = 96.0f,   logoH = 120.0f;
+    inline constexpr float titleY = 236.0f, titleH = 68.0f;
+    inline constexpr float panelY = 322.0f, panelW = 1044.0f, panelH = 739.0f;
+    inline constexpr float captionY = 1078.0f, captionH = 62.0f;
+    inline constexpr float detailY = 1156.0f,  detailH = 764.0f;
+}
+
+/*
+    Draws a region of the rendered panel into a destination rectangle, scaled
+    to COVER it - the crop overflows and is clipped rather than leaving bars.
+    `focus` is in the editor's own 1491x1055 canvas units, so callers can name
+    regions the way Layout.h does.
+*/
+static void drawFocus (juce::Graphics& g, const juce::Image& panel,
+                       juce::Rectangle<float> focus, juce::Rectangle<float> dest,
+                       float alpha)
+{
+    if (! panel.isValid() || alpha <= 0.01f || focus.isEmpty())
+        return;
+
+    const float toRender = (float) panel.getWidth() / 1491.0f;
+    auto src = (focus * toRender).getIntersection (panel.getBounds().toFloat());
+    if (src.isEmpty())
+        return;
+
+    const float scale = juce::jmax (dest.getWidth() / src.getWidth(),
+                                    dest.getHeight() / src.getHeight());
+
+    // Draw the WHOLE panel scaled up, positioned so the focus centre lands on
+    // the destination centre, and let the clip crop. Drawing the image into a
+    // rect the size of the scaled source instead just squeezes the entire
+    // panel into the band, which looks like a duplicate of the shot above.
+    auto whole = juce::Rectangle<float> ((float) panel.getWidth() * scale,
+                                         (float) panel.getHeight() * scale)
+                   .withPosition (dest.getCentreX() - src.getCentreX() * scale,
+                                  dest.getCentreY() - src.getCentreY() * scale);
+
+    juce::Graphics::ScopedSaveState save (g);
+    g.reduceClipRegion (dest.toNearestInt());
+    g.setOpacity (alpha);
+    g.setImageResamplingQuality (juce::Graphics::highResamplingQuality);
+    g.drawImage (panel, whole, juce::RectanglePlacement::stretchToFit, false);
+    g.setOpacity (1.0f);
+
+    g.setColour (tokens::cyan.withAlpha (0.22f * alpha));
+    g.drawRect (dest, 1.0f);
+}
 
 // --- helpers -----------------------------------------------------------------
 
@@ -53,6 +112,9 @@ struct Segment
     juce::String title;
     juce::String caption;
     std::function<void (SourceGloProcessor&, SourceGloEditor&, double progress)> action;
+    // Reel only: the part of the panel the detail band zooms into, in editor
+    // canvas units. Empty means no detail band for this act.
+    juce::Rectangle<float> focus {};
 };
 
 static float smoothstep (float t)
@@ -221,7 +283,7 @@ static void drawLogo (juce::Graphics& g, float alpha, float scale, float centreY
         return;
 
     const float aspect = (float) logo.getWidth() / (float) logo.getHeight();
-    const float w = (float) videoWidth * 0.52f * scale;
+    const float w = (float) videoWidth * (reelMode ? 0.84f : 0.52f) * scale;
     const float h = w / aspect;
 
     auto target = juce::Rectangle<float> (w, h)
@@ -295,17 +357,23 @@ static juce::File buildDemoLibrary()
     auto dir = root.getChildFile ("samples");
     dir.createDirectory();
 
-    struct Demo { const char* name; double freq, seconds, decay; };
+    // One-shots and loops: the film analyses a full beat as a Loop source, so
+    // the ranked suggestions have to be loop-shaped candidates, not only
+    // kicks. Both kinds are generated and the matcher sorts them by profile.
+    struct Demo { const char* name; double freq, seconds, decay; bool loop; };
     static const Demo demos[] = {
-        { "Kick_Deep_01.wav",    52.0, 0.55, 6.0 },
-        { "Kick_Punch_02.wav",   58.0, 0.40, 9.0 },
-        { "Kick_Vintage_03.wav", 49.0, 0.70, 5.0 },
-        { "Kick_Tight_04.wav",   63.0, 0.30, 12.0 },
-        { "Sub_808_Long.wav",    45.0, 2.20, 1.2 },
-        { "Kick_Modern_05.wav",  55.0, 0.48, 7.5 },
+        { "Kick_Deep_01.wav",     52.0, 0.55, 6.0,  false },
+        { "Kick_Punch_02.wav",    58.0, 0.40, 9.0,  false },
+        { "Kick_Vintage_03.wav",  49.0, 0.70, 5.0,  false },
+        { "Sub_808_Long.wav",     45.0, 2.20, 1.2,  false },
+        { "Loop_Trapsoul_01.wav", 55.0, 3.20, 0.0,  true  },
+        { "Loop_Nightdrive.wav",  49.0, 3.20, 0.0,  true  },
+        { "Loop_Smooth_808.wav",  58.0, 3.20, 0.0,  true  },
+        { "Loop_Dusty_Keys.wav",  62.0, 3.20, 0.0,  true  },
     };
 
     juce::WavAudioFormat wav;
+    juce::Random rng (0x100b2);
     for (const auto& d : demos)
     {
         auto file = dir.getChildFile (d.name);
@@ -320,13 +388,40 @@ static juce::File buildDemoLibrary()
 
         const int n = (int) (48000.0 * d.seconds);
         juce::AudioBuffer<float> b (1, n);
-        double phase = 0.0;
+        double phase = 0.0, hatState = 0.0;
         for (int i = 0; i < n; ++i)
         {
             const double t = i / 48000.0;
-            const float env = (float) std::exp (-t * d.decay);
-            phase += 2.0 * juce::MathConstants<double>::pi * (d.freq + 20.0 * env) / 48000.0;
-            b.setSample (0, i, 0.85f * env * (float) std::sin (phase));
+
+            if (! d.loop)
+            {
+                const float env = (float) std::exp (-t * d.decay);
+                phase += 2.0 * juce::MathConstants<double>::pi * (d.freq + 20.0 * env) / 48000.0;
+                b.setSample (0, i, 0.85f * env * (float) std::sin (phase));
+            }
+            else
+            {
+                // A broadband bar: kick on the beat, hats between, a body
+                // chord - so a Loop profile has something real to score.
+                const double beat = 60.0 / 150.0;
+                const double intoBeat = std::fmod (t, beat);
+                const double intoEighth = std::fmod (t, beat * 0.5);
+                const float kickEnv = (float) std::exp (-intoBeat * 20.0);
+                phase += 2.0 * juce::MathConstants<double>::pi
+                           * (d.freq + 30.0 * kickEnv) / 48000.0;
+                const float kick = 0.75f * kickEnv * (float) std::sin (phase);
+
+                const float hatEnv = (float) std::exp (-intoEighth * 80.0);
+                const float noise = rng.nextFloat() * 2.0f - 1.0f;
+                hatState += 0.55 * (noise - hatState);
+                const float hat = (float) ((noise - hatState) * hatEnv * 0.18);
+
+                const float body = 0.16f * (float) (
+                      std::sin (2.0 * juce::MathConstants<double>::pi * d.freq * 4.0 * t)
+                    + std::sin (2.0 * juce::MathConstants<double>::pi * d.freq * 6.0 * t));
+
+                b.setSample (0, i, juce::jlimit (-1.0f, 1.0f, kick + hat + body));
+            }
         }
         writer->writeFromAudioSampleBuffer (b, 0, n);
     }
@@ -340,9 +435,24 @@ int main (int argc, char** argv)
     juce::ScopedJuceInitialiser_GUI juceInit;
     @autoreleasepool
     {
+        // The flag is pulled out first and the positions read from what is
+        // left: treating "reel" as positional is how MasterGlo's first reel
+        // render silently came out with no soundtrack.
         juce::StringArray args;
         for (int i = 1; i < argc; ++i)
-            args.add (juce::String (argv[i]));
+        {
+            const juce::String a { argv[i] };
+            if (a.equalsIgnoreCase ("reel"))
+                reelMode = true;
+            else if (a.isNotEmpty())
+                args.add (a);
+        }
+
+        if (reelMode)
+        {
+            videoWidth = 1080;
+            videoHeight = 1920;
+        }
 
         const juce::String outPath = args.size() > 0 ? args[0]
                                                      : juce::String ("SourceGloPro-demo.mp4");
@@ -406,7 +516,8 @@ int main (int argc, char** argv)
               [] (SourceGloProcessor& p, SourceGloEditor& e, double)
               {
                   e.showAnalysisTab (0);
-                  loadPreset (p, "Punchy Kick Starter");
+                  loadPreset (p, "Loop Glue Fast");
+                  setParam (p, pid::sourceType, 8.0f);      // a full beat is a Loop
               } },
 
             { 5.5, 11.0, "Know before you build",
@@ -519,9 +630,9 @@ int main (int argc, char** argv)
               {
                   e.showAnalysisTab (0);
 
-                  static const char* names[] = { "Deep 808 Control", "Snare Snap Doctor",
-                                                 "Vocal Clarity Rescue", "Loop Tape Warmth",
-                                                 "Tight Kick Snap" };
+                  static const char* names[] = { "Loop Tape Warmth", "Deep 808 Control",
+                                                 "Loop Wide & Bright", "Vocal Clarity Rescue",
+                                                 "Punchy Kick Starter" };
                   const int count = (int) (sizeof (names) / sizeof (names[0]));
                   const int index = juce::jlimit (0, count - 1, (int) (progress * count));
 
@@ -537,7 +648,95 @@ int main (int argc, char** argv)
             { 108.0, 116.0, {}, {}, nullptr },      // logo closer
         };
 
-        const double duration = timeline.back().end;
+        // A reel earns attention in the first second or loses it: six acts in
+        // 44 s, each with the panel region it is talking about blown up in the
+        // lower half. Focus rects are in the editor's 1491x1055 canvas.
+        const std::vector<Segment> reelTimeline =
+        {
+            { 0.0, 3.4, {}, {},
+              [] (SourceGloProcessor& p, SourceGloEditor& e, double)
+              {
+                  e.showAnalysisTab (0);
+                  loadPreset (p, "Loop Glue Fast");
+                  setParam (p, pid::sourceType, 8.0f);
+              }, {} },
+
+            { 3.4, 10.5, "Score any source",
+              "0-100 against a modern pro standard",
+              [] (SourceGloProcessor& p, SourceGloEditor&, double progress)
+              {
+                  if (progress > 0.35 && ! p.getAnalysis().analyzed)
+                      p.analyzeNow();
+              },
+              { 560.0f, 78.0f, 500.0f, 420.0f } },       // the score ring
+
+            { 10.5, 17.5, "It names the problem",
+              "Masking, headroom, phase, mud - in plain language",
+              nullptr,
+              { 1030.0f, 78.0f, 440.0f, 430.0f } },      // diagnostics column
+
+            { 17.5, 26.5, "One button fixes it",
+              "The correction the analysis computed, scaled to taste",
+              [] (SourceGloProcessor& p, SourceGloEditor&, double progress)
+              {
+                  if (! p.isFixEngaged() && progress > 0.12)
+                  {
+                      p.requestFixSource();
+                      p.analyzeNow();
+                  }
+                  if (progress > 0.3)
+                  {
+                      const float ride = (float) juce::jlimit (0.0, 1.0, (progress - 0.3) / 0.55);
+                      setParam (p, pid::fixAmount, 20.0f + ride * 80.0f);
+                      static const double marks[] = { 0.5, 0.7, 0.88 };
+                      for (double mark : marks)
+                          if (progress > mark && progress < mark + 0.04)
+                              p.analyzeNow();
+                  }
+              },
+              { 350.0f, 440.0f, 660.0f, 90.0f } },       // the three buttons
+
+            { 26.5, 34.5, "Eight macros",
+              juce::String::fromUTF8 ("Sub · Punch · Body · Tone · Air · Stereo · Transients · Saturate"),
+              [] (SourceGloProcessor& p, SourceGloEditor&, double progress)
+              {
+                  struct Move { const char* id; float rest, peak; };
+                  static const Move moves[] = {
+                      { pid::sub,        15.0f, 80.0f },
+                      { pid::punch,      45.0f, 95.0f },
+                      { pid::body,       50.0f, 90.0f },
+                      { pid::air,        40.0f, 88.0f },
+                      { pid::stereo,     30.0f, 85.0f },
+                      { pid::saturate,   40.0f, 92.0f },
+                  };
+                  const int count = (int) (sizeof (moves) / sizeof (moves[0]));
+                  const double each = 1.0 / count;
+                  for (int i = 0; i < count; ++i)
+                  {
+                      const double local = (progress - i * each) / each;
+                      const float bump = (local >= 0.0 && local <= 1.0)
+                          ? (float) (0.5 - 0.5 * std::cos (local * 2.0
+                                        * juce::MathConstants<double>::pi))
+                          : 0.0f;
+                      setParam (p, moves[i].id,
+                                moves[i].rest + (moves[i].peak - moves[i].rest) * bump);
+                  }
+              },
+              { 20.0f, 855.0f, 1000.0f, 150.0f } },      // the macro row
+
+            { 34.5, 44.0, "Or replace it",
+              "Ranked matches from your own sample library",
+              [] (SourceGloProcessor&, SourceGloEditor& e, double)
+              {
+                  e.showAnalysisTab (2);
+              },
+              { 1017.0f, 528.0f, 464.0f, 441.0f } },     // rescue panel
+
+            { 44.0, 51.0, {}, {}, nullptr, {} },         // logo closer
+        };
+
+        const auto& script = reelMode ? reelTimeline : timeline;
+        const double duration = script.back().end;
         const int totalFrames = (int) (duration * fps);
 
         // --- writer ------------------------------------------------------------
@@ -628,7 +827,7 @@ int main (int argc, char** argv)
             const double t = (double) f / fps;
 
             const Segment* current = nullptr;
-            for (const auto& seg : timeline)
+            for (const auto& seg : script)
                 if (t >= seg.start && t < seg.end)
                     current = &seg;
 
@@ -661,87 +860,142 @@ int main (int argc, char** argv)
                 juce::Graphics g (frame);
                 drawBackdrop (g);
 
-                const float panelAlpha = envelopeFor (t, 4.6, 109.0, 1.2, 1.0);
+                const float panelAlpha = reelMode ? envelopeFor (t, 2.9, 44.4, 0.9, 0.8)
+                                                  : envelopeFor (t, 4.6, 109.0, 1.2, 1.0);
 
                 if (panelAlpha > 0.01f)
                 {
                     { juce::Graphics pg (panel); editor->paintEntireComponent (pg, true); }
 
                     const float rise = (1.0f - panelAlpha) * 26.0f;
-                    // 1244 wide keeps the native 1491x1055 canvas' aspect and
-                    // leaves room for the title band and the caption rule.
-                    auto target = juce::Rectangle<float> (1244.0f, 880.0f)
-                                    .withCentre ({ (float) videoWidth * 0.5f, 512.0f + rise });
 
-                    g.setColour (juce::Colours::black.withAlpha (0.55f * panelAlpha));
-                    g.fillRoundedRectangle (target.expanded (16.0f), 24.0f);
+                    if (reelMode)
+                    {
+                        auto full = juce::Rectangle<float> (reel::panelW, reel::panelH)
+                                      .withCentre ({ (float) videoWidth * 0.5f,
+                                                     reel::panelY + reel::panelH * 0.5f + rise });
 
-                    g.setOpacity (panelAlpha);
-                    g.setImageResamplingQuality (juce::Graphics::highResamplingQuality);
-                    g.drawImage (panel, target, juce::RectanglePlacement::centred, false);
-                    g.setOpacity (1.0f);
+                        g.setColour (juce::Colours::black.withAlpha (0.5f * panelAlpha));
+                        g.fillRoundedRectangle (full.expanded (12.0f), 18.0f);
+
+                        g.setOpacity (panelAlpha);
+                        g.setImageResamplingQuality (juce::Graphics::highResamplingQuality);
+                        g.drawImage (panel, full, juce::RectanglePlacement::stretchToFit, false);
+                        g.setOpacity (1.0f);
+
+                        // ...and the act's own region blown up underneath, so
+                        // the lower half is real interface, not backdrop.
+                        if (current != nullptr)
+                            drawFocus (g, panel, current->focus,
+                                       juce::Rectangle<float> (0.0f, reel::detailY,
+                                                               (float) videoWidth, reel::detailH),
+                                       panelAlpha);
+
+                        // Small wordmark riding the top band once the intro is over.
+                        drawLogo (g, 0.9f * panelAlpha, 0.60f, reel::logoY + reel::logoH * 0.5f);
+                    }
+                    else
+                    {
+                        // 1244 wide keeps the native 1491x1055 canvas' aspect
+                        // and leaves room for the title and caption bands.
+                        auto target = juce::Rectangle<float> (1244.0f, 880.0f)
+                                        .withCentre ({ (float) videoWidth * 0.5f, 512.0f + rise });
+
+                        g.setColour (juce::Colours::black.withAlpha (0.55f * panelAlpha));
+                        g.fillRoundedRectangle (target.expanded (16.0f), 24.0f);
+
+                        g.setOpacity (panelAlpha);
+                        g.setImageResamplingQuality (juce::Graphics::highResamplingQuality);
+                        g.drawImage (panel, target, juce::RectanglePlacement::centred, false);
+                        g.setOpacity (1.0f);
+                    }
                 }
 
                 // Logo opener: the mark rises alone, then cross-dissolves into
                 // the full lockup. The wordmark asset ALREADY contains the
                 // mark, so drawing both at once reads as a duplicated logo -
                 // they must never overlap.
-                const float markAlpha = envelopeFor (t, 0.15, 2.5, 1.0, 0.55);
-                if (markAlpha > 0.01f)
-                    drawMark (g, markAlpha * 0.95f, 270.0f + 26.0f * markAlpha,
-                              { (float) videoWidth * 0.5f, 500.0f });
+                const float centreY = (float) videoHeight * 0.5f;
 
-                const float introAlpha = envelopeFor (t, 2.25, 4.9, 0.85, 0.8);
+                const float markAlpha = reelMode ? envelopeFor (t, 0.1, 1.9, 0.8, 0.5)
+                                                 : envelopeFor (t, 0.15, 2.5, 1.0, 0.55);
+                if (markAlpha > 0.01f)
+                    drawMark (g, markAlpha * 0.95f,
+                              (reelMode ? 300.0f : 270.0f) + 26.0f * markAlpha,
+                              { (float) videoWidth * 0.5f, centreY });
+
+                const float introAlpha = reelMode ? envelopeFor (t, 1.7, 3.4, 0.7, 0.6)
+                                                  : envelopeFor (t, 2.25, 4.9, 0.85, 0.8);
                 if (introAlpha > 0.01f)
                 {
-                    drawLogo (g, introAlpha, 0.97f + 0.03f * introAlpha, 505.0f);
+                    drawLogo (g, introAlpha, 0.97f + 0.03f * introAlpha, centreY);
                     g.setColour (tokens::cyan.withAlpha (0.85f * introAlpha));
                     drawTracked (g, "PRODUCTION INTELLIGENCE FOR BETTER MIXES",
-                                 juce::Rectangle<float> (0.0f, 640.0f, (float) videoWidth, 44.0f),
-                                 Fonts::make (25.0f), 5.0f);
+                                 juce::Rectangle<float> (0.0f, centreY + 128.0f,
+                                                         (float) videoWidth, 44.0f),
+                                 Fonts::make (reelMode ? 20.0f : 25.0f), 5.0f);
                 }
 
                 // Logo closer.
-                const float outroAlpha = envelopeFor (t, 108.4, 116.0, 1.1, 1.2);
+                const float outroAlpha = reelMode ? envelopeFor (t, 43.8, 51.0, 0.9, 1.0)
+                                                  : envelopeFor (t, 108.4, 116.0, 1.1, 1.2);
                 if (outroAlpha > 0.01f)
                 {
-                    drawLogo (g, outroAlpha, 1.0f, 500.0f);
+                    drawLogo (g, outroAlpha, 1.0f, centreY);
 
                     g.setColour (tokens::text.withAlpha (0.88f * outroAlpha));
                     // fromUTF8, not a bare literal: juce::String reads the middle
                     // dot's two UTF-8 bytes as Latin-1 and draws "Â·".
-                    drawTracked (g, juce::String::fromUTF8 ("VST3  ·  AUDIO UNIT  ·  STANDALONE  ·  MACOS"),
-                                 juce::Rectangle<float> (0.0f, 636.0f, (float) videoWidth, 44.0f),
-                                 Fonts::make (24.0f), 4.0f);
+                    drawTracked (g, juce::String::fromUTF8 (reelMode ? "VST3  ·  AU  ·  STANDALONE"
+                                                    : "VST3  ·  AUDIO UNIT  ·  STANDALONE  ·  MACOS"),
+                                 juce::Rectangle<float> (0.0f, centreY + 124.0f,
+                                                         (float) videoWidth, 44.0f),
+                                 Fonts::make (reelMode ? 21.0f : 24.0f), 4.0f);
                     g.setColour (tokens::gold.withAlpha (0.85f * outroAlpha));
                     drawTracked (g, "DIAMOND LOOPZ",
-                                 juce::Rectangle<float> (0.0f, 706.0f, (float) videoWidth, 40.0f),
-                                 Fonts::make (21.0f), 6.0f);
+                                 juce::Rectangle<float> (0.0f, centreY + 192.0f,
+                                                         (float) videoWidth, 40.0f),
+                                 Fonts::make (reelMode ? 19.0f : 21.0f), 6.0f);
                 }
 
                 if (current != nullptr)
                 {
-                    drawTitle (g, current->title,
-                               envelopeFor (t, current->start, current->end, 0.6, 0.6),
-                               juce::Rectangle<float> (0.0f, 26.0f, (float) videoWidth, 74.0f),
-                               50.0f, false);
-                    drawCaption (g, current->caption,
-                                 envelopeFor (t, current->start, current->end, 0.5, 0.5),
-                                 juce::Rectangle<float> (0.0f, 992.0f, (float) videoWidth, 60.0f));
+                    const float fade = envelopeFor (t, current->start, current->end,
+                                                    reelMode ? 0.45 : 0.6,
+                                                    reelMode ? 0.45 : 0.6);
+                    drawTitle (g, current->title, fade,
+                               reelMode ? juce::Rectangle<float> (0.0f, reel::titleY,
+                                                                  (float) videoWidth, reel::titleH)
+                                        : juce::Rectangle<float> (0.0f, 26.0f,
+                                                                  (float) videoWidth, 74.0f),
+                               reelMode ? 44.0f : 50.0f, false);
+                    drawCaption (g, current->caption, fade,
+                                 reelMode ? juce::Rectangle<float> (0.0f, reel::captionY,
+                                                                    (float) videoWidth, reel::captionH)
+                                          : juce::Rectangle<float> (0.0f, 992.0f,
+                                                                    (float) videoWidth, 60.0f),
+                                 reelMode ? 23.0f : 27.0f);
                 }
             }
 
             // A still per act, so a render can be reviewed without scrubbing -
             // and a bad overlay is caught here rather than after upload.
             {
-                static const std::array<double, 14> stillTimes
+                static const std::array<double, 14> filmStills
                     { 1.6, 3.6, 8.0, 16.0, 24.0, 33.0, 47.6, 56.0, 65.0, 74.0,
                       84.0, 93.0, 102.0, 112.0 };
+                static const std::array<double, 8> reelStills
+                    { 1.2, 2.8, 7.0, 14.0, 24.0, 31.0, 40.0, 47.5 };
+
+                std::vector<double> stillTimes;
+                if (reelMode) stillTimes.assign (reelStills.begin(), reelStills.end());
+                else          stillTimes.assign (filmStills.begin(), filmStills.end());
+
                 for (double mark : stillTimes)
                     if (std::abs (t - mark) < 0.5 / fps)
                     {
                         auto dir = juce::File::getCurrentWorkingDirectory()
-                                    .getChildFile ("video-stills");
+                                    .getChildFile (reelMode ? "reel-stills" : "video-stills");
                         dir.createDirectory();
                         auto still = dir.getChildFile ("still-" + juce::String (mark, 1) + "s.png");
                         still.deleteFile();

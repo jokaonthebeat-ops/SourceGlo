@@ -300,10 +300,31 @@ AnalysisResult AnalysisEngine::analyse (const juce::AudioBuffer<float>& stereo,
 
         if (bestLag > minLag && bestScore > 0.10)
         {
+            // Autocorrelation cannot tell a tempo from its octaves: a 150 BPM
+            // trap beat correlates just as well at 75, and simply clamping
+            // into a range keeps whichever octave the lag happened to land
+            // in (which reported a real 150 BPM beat as 74.9). Pick the
+            // octave closest to 125 BPM in LOG space instead - that is where
+            // modern productions cluster, and it resolves 75-vs-150 for trap
+            // without dragging a genuine 92 BPM beat up to 184.
             double bpm = 60.0 * frameRate / bestLag;
-            while (bpm < 70.0)  bpm *= 2.0;
-            while (bpm > 180.0) bpm *= 0.5;
-            r.tempoBpm = (float) bpm;
+            while (bpm < 60.0)  bpm *= 2.0;
+            while (bpm > 240.0) bpm *= 0.5;
+
+            constexpr double preferred = 125.0;
+            double best = bpm, bestDistance = std::abs (std::log (bpm / preferred));
+            for (double candidate : { bpm * 0.5, bpm * 2.0 })
+            {
+                if (candidate < 60.0 || candidate > 200.0)
+                    continue;
+                const double distance = std::abs (std::log (candidate / preferred));
+                if (distance < bestDistance)
+                {
+                    bestDistance = distance;
+                    best = candidate;
+                }
+            }
+            r.tempoBpm = (float) best;
         }
     }
 
@@ -399,7 +420,13 @@ AnalysisResult AnalysisEngine::analyse (const juce::AudioBuffer<float>& stereo,
                          best, noteNames[bestRoot], bestMinor ? "min" : "maj", second);
         }
        #endif
-        if (best > 0.55 && best - second > 0.04)
+        // The MARGIN over the runner-up decides, not the absolute
+        // correlation. A full mix has energy in every pitch class, which
+        // flattens chroma and drags the winner's correlation down even when
+        // it is unambiguous - a real A# minor beat scored 0.537 against the
+        // old 0.55 gate and reported no key at all, while leading the
+        // runner-up by 0.32.
+        if (best > 0.45f && best - second > 0.08)
             r.keyName = juce::String (noteNames[bestRoot]) + (bestMinor ? " Minor" : " Major");
     }
 

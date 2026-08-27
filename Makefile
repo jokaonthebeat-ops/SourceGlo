@@ -217,7 +217,7 @@ CONFIG_STAMP := $(DIST)/.config-$(CONFIG_TAG)
 # -----------------------------------------------------------------------------
 
 .PHONY: all vst3 au standalone install universal clean distclean release \
-        juceobjs syntax uishot dsptest test sanitize installer notarize icon video video reel assets
+        juceobjs syntax uishot dsptest test sanitize installer notarize icon video reel video reel assets
 
 all: vst3 au standalone
 
@@ -459,13 +459,30 @@ $(TOOLS)/makevideo: $(PLUG_OBJS) $(ROOT)/tools/MakeVideo.cpp $(ROOT)/JucePluginD
 
 video: $(TOOLS)/makevideo
 	@mkdir -p $(ROOT)/marketing
-	@cd $(ROOT)/marketing && $(TOOLS)/makevideo SourceGloPro-demo.mp4 $(ARGS)
+	@cd $(ROOT)/marketing && $(TOOLS)/makevideo SourceGloPro-demo.mp4 \
+	   $(if $(BEAT),"$(BEAT)",$(ARGS))
 
 # The same film at a web bitrate, for upload.
 .PHONY: video-web
 video-web: $(TOOLS)/makevideo
 	@mkdir -p $(ROOT)/marketing
-	@cd $(ROOT)/marketing && $(TOOLS)/makevideo SourceGloPro-demo-web.mp4 "" 0 5
+	@cd $(ROOT)/marketing && $(TOOLS)/makevideo SourceGloPro-demo-web.mp4 $(if $(BEAT),"$(BEAT)","") 0 5
+
+# The vertical cut: 1080x1920, 51 s, for Reels / Shorts / TikTok.
+# BEAT is quoted separately from ARGS because ARGS is word-split by the shell
+# and real beat paths have spaces in them.
+BEAT ?=
+
+.PHONY: reel reel-web
+reel: $(TOOLS)/makevideo
+	@mkdir -p $(ROOT)/marketing
+	@cd $(ROOT)/marketing && $(TOOLS)/makevideo reel SourceGloPro-reel.mp4 \
+	   $(if $(BEAT),"$(BEAT)") $(if $(BEAT),0) $(if $(BEAT),14)
+
+reel-web: $(TOOLS)/makevideo
+	@mkdir -p $(ROOT)/marketing
+	@cd $(ROOT)/marketing && $(TOOLS)/makevideo reel SourceGloPro-reel-web.mp4 \
+	   $(if $(BEAT),"$(BEAT)") $(if $(BEAT),0) 5
 
 $(TOOLS)/dsptest: $(PLUG_OBJS) $(ROOT)/tools/DspTest.cpp $(ROOT)/JucePluginDefines.h
 	@mkdir -p $(TOOLS)

@@ -352,13 +352,24 @@ int main()
             checkNear (r.truePeakDb, 0.0, 0.35, "fs/4 true peak reads 0 dBTP");
         }
 
-        // --- tempo from kick patterns.
+        // --- tempo from kick patterns, across the octave-choice boundary.
+        //     Autocorrelation cannot tell a tempo from its octaves, so the
+        //     engine picks the octave nearest 125 BPM in log space. A real
+        //     150 BPM trap beat used to report 74.9.
         {
             const auto r128 = AnalysisEngine::analyse (makeKickPattern (128.0, 6.0), sr, 1);
             checkNear (r128.tempoBpm, 128.0, 2.0, "tempo 128 BPM detected");
 
             const auto r92 = AnalysisEngine::analyse (makeKickPattern (92.0, 6.0), sr, 1);
-            checkNear (r92.tempoBpm, 92.0, 2.0, "tempo 92 BPM detected");
+            checkNear (r92.tempoBpm, 92.0, 2.0, "tempo 92 BPM stays at 92, not doubled");
+
+            const auto r150 = AnalysisEngine::analyse (makeKickPattern (150.0, 6.0), sr, 1);
+            checkNear (r150.tempoBpm, 150.0, 3.0, "tempo 150 BPM is not halved to 75");
+
+            const auto r75 = AnalysisEngine::analyse (makeKickPattern (75.0, 6.0), sr, 1);
+            check (r75.tempoBpm > 140.0 || std::abs (r75.tempoBpm - 75.0) < 3.0,
+                   "75 BPM resolves to 75 or its 150 octave (got "
+                     + juce::String (r75.tempoBpm, 1) + ")");
         }
 
         // --- key from triads (C minor: C-Eb-G, A major: A-C#-E).
