@@ -38,13 +38,22 @@ public:
     {
         // sourceglo::ButtonState, not the juce::Button member type of the
         // same name that unqualified lookup finds first in a Button subclass.
-        const auto state = ! isEnabled()               ? sourceglo::ButtonState::disabled
-                         : (down || getToggleState()) ? sourceglo::ButtonState::down
-                         : over                       ? sourceglo::ButtonState::hover
-                                                      : sourceglo::ButtonState::normal;
+        // A LATCHED button is not a pressed one. The pack ships no "active"
+        // export - measured mean luminance is normal 28.9, down 31.0, hover
+        // 35.8 - so "down" for an engaged toggle reads as pushed-in and dim,
+        // which is why the engaged Fix Source button never looked lit.
+        // Toggled uses the brightest supplied art plus the glow below.
+        const bool latched = getToggleState() && isEnabled();
+        const auto state = ! isEnabled() ? sourceglo::ButtonState::disabled
+                         : down          ? sourceglo::ButtonState::down
+                         : (over || latched) ? sourceglo::ButtonState::hover
+                                             : sourceglo::ButtonState::normal;
 
         auto art = Assets::button (kind, state);
         const auto r = getLocalBounds().toFloat();
+
+        if (latched)
+            drawLatchedGlow (g, r);
 
         if (art.isValid())
             g.drawImage (art, r, juce::RectanglePlacement::stretchToFit);
@@ -77,14 +86,63 @@ public:
 
         if (label.isNotEmpty())
         {
-            g.setColour (labelTint.withMultipliedAlpha (isEnabled() ? 1.0f : 0.4f));
+            g.setColour (latched ? tokens::white
+                                 : labelTint.withMultipliedAlpha (isEnabled() ? 1.0f : 0.4f));
             g.setFont (font);
             g.drawText (label, x, content.getY(), textW + 4, content.getHeight(),
                         juce::Justification::centredLeft);
         }
+
+        if (latched)
+        {
+            // A rim inside the art's own edge, so the button reads as ON
+            // rather than merely hovered.
+            g.setColour (latchColour().withAlpha (0.9f));
+            g.drawRoundedRectangle (r.reduced (1.5f), 7.0f, 1.6f);
+        }
+    }
+
+    // Public so a subclass can pulse it (see FixSourceButton).
+    void setGlowIntensity (float g01)
+    {
+        const float clamped = juce::jlimit (0.0f, 1.0f, g01);
+        if (std::abs (clamped - glowIntensity) > 0.01f)
+        {
+            glowIntensity = clamped;
+            repaint();
+        }
+    }
+
+protected:
+    juce::Colour latchColour() const
+    {
+        return (kind == ButtonKind::mainGold || kind == ButtonKind::smallGold)
+                 ? tokens::gold : tokens::cyan;
+    }
+
+    void drawLatchedGlow (juce::Graphics& g, juce::Rectangle<float> r) const
+    {
+        // Concentric strokes outside the art: a cheap bloom that survives the
+        // button being drawn over it, and reads at video scale.
+        const auto colour = latchColour();
+        const float strength = 0.55f + 0.45f * glowIntensity;
+
+        // A soft filled halo first, then concentric strokes over it: the fill
+        // carries at video scale, the strokes keep the edge defined.
+        g.setColour (colour.withAlpha (0.10f * strength));
+        g.fillRoundedRectangle (r.expanded (9.0f), 15.0f);
+
+        for (int i = 6; i >= 1; --i)
+        {
+            const float grow = (float) i * 2.3f;
+            g.setColour (colour.withAlpha (strength * (0.11f + 0.05f * (float) (7 - i))
+                                             / (float) i));
+            g.drawRoundedRectangle (r.expanded (grow), 8.0f + grow, 2.3f);
+        }
     }
 
 private:
+    float glowIntensity = 0.0f;
     ButtonKind kind;
     juce::String label, iconName;
     juce::Colour iconTint  = tokens::cyan;

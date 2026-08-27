@@ -19,12 +19,31 @@ namespace sourceglo
 // engaged, dragging vertically on it rides the amount like a knob (with a
 // live "FIX - N%" label); a plain click still toggles. The drag swallows the
 // click via consumeDragFlag() so releasing a drag never disengages the fix.
-class FixSourceButton : public AssetButton
+class FixSourceButton : public AssetButton,
+                        private juce::Timer
 {
 public:
     explicit FixSourceButton (SourceGloProcessor& p)
         : AssetButton ("Fix Source", ButtonKind::mainGold, "FIX SOURCE", "fix_source"),
-          processor (p) {}
+          processor (p)
+    {
+        startTimerHz (24);      // the engaged glow breathes
+    }
+
+    void timerCallback() override
+    {
+        if (! getToggleState())
+        {
+            setGlowIntensity (0.0f);
+            phase = 0.0f;
+            return;
+        }
+        // A slow ~0.4 Hz breath: alive on screen without strobing.
+        phase += juce::MathConstants<float>::twoPi * 0.4f / 24.0f;
+        if (phase > juce::MathConstants<float>::twoPi)
+            phase -= juce::MathConstants<float>::twoPi;
+        setGlowIntensity (0.5f + 0.5f * std::sin (phase));
+    }
 
     bool consumeDragFlag()
     {
@@ -75,7 +94,7 @@ public:
 private:
     SourceGloProcessor& processor;
     bool dragging = false, dragConsumed = false;
-    float startValue = 50.0f;
+    float startValue = 50.0f, phase = 0.0f;
 };
 
 class SourceScoreHUD : public juce::Component, private juce::Timer,
@@ -288,6 +307,21 @@ private:
     {
         if (! isShowing() && ! headlessRefreshMode())
             return;
+
+        // Fix button state is synced HERE, not only in the change listener:
+        // ChangeBroadcaster delivery is asynchronous, so a headless render
+        // (and, in principle, a busy message thread) can miss it entirely -
+        // which is why the engaged button stayed unlit in the demo film.
+        {
+            const auto& model = processor.getAnalysis();
+            fixButton.setEnabled (model.analyzed);
+            if (fixButton.getToggleState() != processor.isFixEngaged())
+                fixButton.setToggleState (processor.isFixEngaged(),
+                                          juce::dontSendNotification);
+            if (abButton.getToggleState() != processor.isComparingRaw())
+                abButton.setToggleState (processor.isComparingRaw(),
+                                         juce::dontSendNotification);
+        }
 
         // The gold button reads out the live fix amount while engaged.
         const auto wanted = processor.isFixEngaged()
