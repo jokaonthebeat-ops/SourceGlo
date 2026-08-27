@@ -516,7 +516,7 @@ int main (int argc, char** argv)
               [] (SourceGloProcessor& p, SourceGloEditor& e, double)
               {
                   e.showAnalysisTab (0);
-                  loadPreset (p, "Loop Glue Fast");
+                  loadPreset (p, "Flat Start");
                   setParam (p, pid::sourceType, 8.0f);      // a full beat is a Loop
               } },
 
@@ -657,7 +657,7 @@ int main (int argc, char** argv)
               [] (SourceGloProcessor& p, SourceGloEditor& e, double)
               {
                   e.showAnalysisTab (0);
-                  loadPreset (p, "Loop Glue Fast");
+                  loadPreset (p, "Flat Start");
                   setParam (p, pid::sourceType, 8.0f);
               }, {} },
 

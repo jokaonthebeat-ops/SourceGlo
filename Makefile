@@ -460,29 +460,34 @@ $(TOOLS)/makevideo: $(PLUG_OBJS) $(ROOT)/tools/MakeVideo.cpp $(ROOT)/JucePluginD
 video: $(TOOLS)/makevideo
 	@mkdir -p $(ROOT)/marketing
 	@cd $(ROOT)/marketing && $(TOOLS)/makevideo SourceGloPro-demo.mp4 \
-	   $(if $(BEAT),"$(BEAT)",$(ARGS))
+	   $(if $(BEAT),"$(BEAT)" $(OFFSET) 14,$(ARGS))
 
 # The same film at a web bitrate, for upload.
 .PHONY: video-web
 video-web: $(TOOLS)/makevideo
 	@mkdir -p $(ROOT)/marketing
-	@cd $(ROOT)/marketing && $(TOOLS)/makevideo SourceGloPro-demo-web.mp4 $(if $(BEAT),"$(BEAT)","") 0 5
+	@cd $(ROOT)/marketing && $(TOOLS)/makevideo SourceGloPro-demo-web.mp4 \
+	   $(if $(BEAT),"$(BEAT)" $(OFFSET) 5,"" 0 5)
 
 # The vertical cut: 1080x1920, 51 s, for Reels / Shorts / TikTok.
 # BEAT is quoted separately from ARGS because ARGS is word-split by the shell
 # and real beat paths have spaces in them.
 BEAT ?=
+# Where in the beat the film starts. Not 0: an intro is sparse (no key to
+# detect) and is often the most heavily limited part of a master - the first
+# render of this film opened on a clipped section of the source track.
+OFFSET ?= 60
 
 .PHONY: reel reel-web
 reel: $(TOOLS)/makevideo
 	@mkdir -p $(ROOT)/marketing
 	@cd $(ROOT)/marketing && $(TOOLS)/makevideo reel SourceGloPro-reel.mp4 \
-	   $(if $(BEAT),"$(BEAT)") $(if $(BEAT),0) $(if $(BEAT),14)
+	   $(if $(BEAT),"$(BEAT)" $(OFFSET) 14)
 
 reel-web: $(TOOLS)/makevideo
 	@mkdir -p $(ROOT)/marketing
 	@cd $(ROOT)/marketing && $(TOOLS)/makevideo reel SourceGloPro-reel-web.mp4 \
-	   $(if $(BEAT),"$(BEAT)") $(if $(BEAT),0) 5
+	   $(if $(BEAT),"$(BEAT)" $(OFFSET) 5)
 
 $(TOOLS)/dsptest: $(PLUG_OBJS) $(ROOT)/tools/DspTest.cpp $(ROOT)/JucePluginDefines.h
 	@mkdir -p $(TOOLS)
