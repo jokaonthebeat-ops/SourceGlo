@@ -98,11 +98,24 @@ public:
         addChildComponent (debugOverlay);   // hidden until Cmd+Shift+D
 
         rescue.onBrowseLibrary = [this] { analysisTabs.selectTab (4); };
+
+        // One chooser for the whole canvas: it dims the interface and draws
+        // over every panel, so it must be the last child added.
+        addChildComponent (listOverlay);
+        auto opener = [this] (juce::Rectangle<int> anchor, juce::String title,
+                              std::vector<ListOverlay::Item> items,
+                              std::function<void (int)> pick)
+        {
+            listOverlay.show (anchor, std::move (title), std::move (items), std::move (pick));
+        };
+        header.openList = opener;
+        sourcePanel.openList = opener;
         setSize (Design::width, Design::height);
     }
 
     void resized() override
     {
+        listOverlay.setBounds (getLocalBounds());     // covers the whole canvas
         header.setBounds (layout::header);
         sourcePanel.setBounds (layout::sourcePanel);
         hud.setBounds (layout::heroPanel);
@@ -131,6 +144,7 @@ public:
         }
     }
 
+    ListOverlay listOverlay;
     HeaderComponent header;
     SourcePanelComponent sourcePanel;
     SourceScoreHUD hud;
@@ -247,6 +261,7 @@ void SourceGloEditor::openSourceTypeMenu()
 
 void SourceGloEditor::dismissMenus()
 {
+    content->listOverlay.hide();
     juce::PopupMenu::dismissAllActiveMenus();
 }
 

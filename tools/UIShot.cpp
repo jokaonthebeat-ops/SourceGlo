@@ -167,6 +167,13 @@ int main (int argc, char** argv)
     if (sgEditor != nullptr && wantTab > 0)
         sgEditor->showAnalysisTab (wantTab);
 
+    // "menu" as the tab argument opens the preset browser instead, so the
+    // chooser can be checked without rendering a whole film.
+    if (sgEditor != nullptr && argc > 4 && juce::String (argv[4]) == "menu")
+        sgEditor->openPresetBrowser();
+    if (sgEditor != nullptr && argc > 4 && juce::String (argv[4]) == "types")
+        sgEditor->openSourceTypeMenu();
+
     // Let the animated displays settle (score climb, spectrum smoothing).
     if (sgEditor != nullptr)
     {

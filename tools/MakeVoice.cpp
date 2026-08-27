@@ -13,6 +13,7 @@
 #include <juce_gui_basics/juce_gui_basics.h>
 #include <juce_audio_formats/juce_audio_formats.h>
 #import <AVFoundation/AVFoundation.h>
+#import <AppKit/AppKit.h>
 #include <cstdio>
 
 int main (int argc, char** argv)
@@ -75,6 +76,84 @@ int main (int argc, char** argv)
         std::printf ("voice: %s (%s)\n",
                      chosen != nil ? chosen.name.UTF8String : "system default",
                      chosen != nil ? chosen.identifier.UTF8String : "-");
+
+        // NSSpeechSynthesizer first: startSpeakingString:toURL: is the API
+        // actually built for rendering to a file, and it works where
+        // AVSpeechSynthesizer's offline buffer callback stays silent.
+        {
+            auto* nsSynth = [[NSSpeechSynthesizer alloc] initWithVoice: nil];
+            if (nsSynth != nil)
+            {
+                if (voiceWanted != "-")
+                    for (NSString* vid in [NSSpeechSynthesizer availableVoices])
+                        if (juce::String (vid.UTF8String).containsIgnoreCase (voiceWanted))
+                        {
+                            [nsSynth setVoice: vid];
+                            break;
+                        }
+
+                auto aiff = outFile.withFileExtension ("aiff");
+                aiff.deleteFile();
+                auto* url = [NSURL fileURLWithPath:
+                               [NSString stringWithUTF8String: aiff.getFullPathName().toRawUTF8()]];
+
+                const BOOL started = [nsSynth startSpeakingString:
+                                         [NSString stringWithUTF8String: text.toRawUTF8()]
+                                                                   toURL: url];
+                std::printf ("NSSpeechSynthesizer: voices=%d started=%d\n",
+                             (int) [NSSpeechSynthesizer availableVoices].count, (int) started);
+                if (started)
+                {
+                    const double limit = juce::Time::getMillisecondCounterHiRes() + 20000.0;
+                    while ([nsSynth isSpeaking] && juce::Time::getMillisecondCounterHiRes() < limit)
+                        CFRunLoopRunInMode (kCFRunLoopDefaultMode, 0.02, false);
+
+                    std::printf ("  rendered %lld bytes to %s\n",
+                                 (long long) aiff.getSize(),
+                                 aiff.getFileName().toRawUTF8());
+                    if (aiff.getSize() > 8192)
+                    {
+                        juce::AudioFormatManager fm;
+                        fm.registerBasicFormats();
+                        if (std::unique_ptr<juce::AudioFormatReader> rd (fm.createReaderFor (aiff));
+                            rd != nullptr && rd->lengthInSamples > 64)
+                        {
+                            juce::AudioBuffer<float> in ((int) rd->numChannels,
+                                                         (int) rd->lengthInSamples);
+                            rd->read (&in, 0, (int) rd->lengthInSamples, 0, true, true);
+
+                            juce::AudioBuffer<float> mono (1, in.getNumSamples());
+                            mono.clear();
+                            for (int ch = 0; ch < in.getNumChannels(); ++ch)
+                                mono.addFrom (0, 0, in, ch, 0, in.getNumSamples(),
+                                              1.0f / (float) in.getNumChannels());
+
+                            outFile.deleteFile();
+                            juce::WavAudioFormat wavOut;
+                            if (auto st = std::unique_ptr<juce::OutputStream> (outFile.createOutputStream()))
+                            {
+                                const auto opts = juce::AudioFormatWriterOptions{}
+                                                    .withSampleRate (rd->sampleRate)
+                                                    .withNumChannels (1)
+                                                    .withBitsPerSample (16);
+                                if (auto w = wavOut.createWriterFor (st, opts))
+                                {
+                                    w->writeFromAudioSampleBuffer (mono, 0, mono.getNumSamples());
+                                    w.reset();
+                                    aiff.deleteFile();
+                                    std::printf ("wrote %s  %.2f s @ %.0f Hz (NSSpeechSynthesizer)\n",
+                                                 outFile.getFullPathName().toRawUTF8(),
+                                                 (double) mono.getNumSamples() / rd->sampleRate,
+                                                 rd->sampleRate);
+                                    return 0;
+                                }
+                            }
+                        }
+                    }
+                    aiff.deleteFile();
+                }
+            }
+        }
 
         auto* synth = [[AVSpeechSynthesizer alloc] init];
 

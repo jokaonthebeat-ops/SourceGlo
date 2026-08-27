@@ -6,6 +6,7 @@
 
 #pragma once
 #include "Widgets.h"
+#include "ListOverlay.h"
 #include "../PluginProcessor.h"
 
 namespace sourceglo
@@ -78,6 +79,11 @@ public:
     {
         processor.getPresets().changed.removeChangeListener (this);
     }
+
+    // Set by the editor: opens the in-window chooser. A plugin's list must
+    // stay inside the plugin window.
+    std::function<void (juce::Rectangle<int>, juce::String,
+                        std::vector<ListOverlay::Item>, std::function<void (int)>)> openList;
 
     // Headless tools: open the real preset browser for the film.
     void openPresetBrowser()  { showPresetMenu(); }
@@ -158,31 +164,39 @@ private:
 
     void showPresetMenu()
     {
-        auto& bank = processor.getPresets();
-        juce::PopupMenu menu;
-        menu.setLookAndFeel (&getLookAndFeel());
+        if (! openList)
+            return;
 
+        auto& bank = processor.getPresets();
+        std::vector<ListOverlay::Item> list;
         juce::String lastCategory;
         for (int i = 0; i < bank.getNumPresets(); ++i)
         {
             const auto& preset = bank.getPreset (i);
+            ListOverlay::Item item;
+            item.text = preset.name;
             if (preset.category != lastCategory)
             {
                 lastCategory = preset.category;
-                menu.addSectionHeader (lastCategory.toUpperCase());
+                item.section = lastCategory;
             }
-            menu.addItem (i + 1, preset.name, true, i == bank.getCurrentIndex());
+            item.ticked = (i == bank.getCurrentIndex());
+            list.push_back (std::move (item));
         }
 
-        menu.showMenuAsync (juce::PopupMenu::Options()
-                              .withParentComponent (getTopLevelComponent())
-                              .withTargetScreenArea (localAreaToGlobal (
-                                  juce::Rectangle<int> (784, 14, 222, 40))),
-                            [safe = juce::Component::SafePointer<HeaderComponent> (this)] (int r)
-                            {
-                                if (safe != nullptr && r > 0)
-                                    safe->processor.getPresets().load (r - 1);
-                            });
+        openList (localAreaToGlobalOfParent ({ 784, 14, 222, 40 }), "Presets", std::move (list),
+                  [safe = juce::Component::SafePointer<HeaderComponent> (this)] (int index)
+                  {
+                      if (safe != nullptr)
+                          safe->processor.getPresets().load (index);
+                  });
+    }
+
+    // The overlay lives in the editor's canvas, so anchors are converted out
+    // of this component's local space into the parent's.
+    juce::Rectangle<int> localAreaToGlobalOfParent (juce::Rectangle<int> local) const
+    {
+        return local + getPosition();
     }
 
     void promptSaveAs()

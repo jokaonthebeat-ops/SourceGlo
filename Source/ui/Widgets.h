@@ -430,6 +430,11 @@ public:
     std::function<void (int)> onChange;
 
     int getSelectedIndex() const     { return index; }
+    int getNumItems() const          { return items.size(); }
+    juce::String getItemText (int i) const
+    {
+        return juce::isPositiveAndBelow (i, items.size()) ? items[i] : juce::String();
+    }
     void setSelectedIndex (int i, juce::NotificationType notify = juce::sendNotification)
     {
         index = juce::jlimit (0, items.size() - 1, i);
@@ -438,7 +443,15 @@ public:
         repaint();
     }
 
-    void mouseDown (const juce::MouseEvent&) override   { openMenu(); }
+    // When an owner provides onOpen, it shows the in-window chooser instead
+    // of an OS popup (see ListOverlay for why that matters in a plugin).
+    std::function<void()> onOpen;
+
+    void mouseDown (const juce::MouseEvent&) override
+    {
+        if (onOpen) onOpen();
+        else        openMenu();
+    }
 
     void openMenu()
     {

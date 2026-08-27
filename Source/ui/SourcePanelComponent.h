@@ -6,6 +6,7 @@
 
 #pragma once
 #include "Widgets.h"
+#include "ListOverlay.h"
 #include "../PluginProcessor.h"
 
 namespace sourceglo
@@ -20,6 +21,7 @@ public:
         setTitle ("Source panel");
 
         addAndMakeVisible (typeDropdown);
+        typeDropdown.onOpen = [this] { openTypeMenu(); };
         typeDropdown.onChange = [this] (int i)
         {
             if (auto* param = processor.getAPVTS().getParameter (pid::sourceType))
@@ -66,8 +68,30 @@ public:
         processor.analysisChanged.removeChangeListener (this);
     }
 
-    // Headless tools: open the real source-type menu for the film.
-    void openTypeMenu()   { typeDropdown.openMenu(); }
+    std::function<void (juce::Rectangle<int>, juce::String,
+                        std::vector<ListOverlay::Item>, std::function<void (int)>)> openList;
+
+    // Headless tools: open the real source-type list for the film.
+    void openTypeMenu()
+    {
+        if (! openList)
+            return;
+
+        std::vector<ListOverlay::Item> list;
+        const int current = (int) processor.getAPVTS()
+                              .getRawParameterValue (pid::sourceType)->load();
+        for (int i = 0; i < typeDropdown.getNumItems(); ++i)
+            list.push_back ({ typeDropdown.getItemText (i), juce::String(), i == current });
+
+        openList (typeDropdown.getBounds() + getPosition(), "Source type", std::move (list),
+                  [this] (int index)
+                  {
+                      if (auto* param = processor.getAPVTS().getParameter (pid::sourceType))
+                          param->setValueNotifyingHost (
+                              dynamic_cast<juce::RangedAudioParameter*> (param)
+                                ->convertTo0to1 ((float) index));
+                  });
+    }
 
     void resized() override
     {
