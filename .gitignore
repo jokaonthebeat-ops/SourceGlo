@@ -2,10 +2,3 @@ build/
 /*.zip
 .DS_Store
 build-cmake/
-
-# Rendered marketing media: regenerable with `make video` / `make reel`, and
-# each render is ~85 MB. Six committed versions of the film had already put
-# 833 MB of dead blobs in this repository's history.
-marketing/*.mp4
-marketing/video-stills/
-marketing/reel-stills/
