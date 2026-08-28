@@ -1,0 +1,100 @@
+SOURCEGLO PRO 1.0.0 - WINDOWS
+Production Intelligence for Better Mixes
+Diamond Loopz
+
+
+TWO WAYS TO INSTALL. PICK ONE.
+==============================
+
+MANUAL INSTALL  (recommended - no security warnings)
+----------------------------------------------------
+
+Open the "Manual Install" folder and copy:
+
+  SourceGlo Pro.vst3   ->  C:\Program Files\Common Files\VST3\
+
+That is the whole VST3 install. It is a folder, not a file - copy the whole
+thing. Then rescan plugins in your DAW.
+
+For the standalone app, copy BOTH of these to the same folder anywhere you
+like (your Desktop is fine):
+
+  SourceGlo Pro.exe
+  Assets\            <- the whole folder
+
+The .exe needs the Assets folder sitting next to it. Without it the app opens
+with plain grey controls instead of the real interface.
+
+
+INSTALLER
+---------
+
+Open the "Installer" folder and run SourceGloPro-1.0.0-Windows.exe. It will ask
+for administrator rights, because the VST3 folder is outside your user profile.
+
+This build is not code-signed, so Windows SmartScreen will show a blue
+"Windows protected your PC" box. Click "More info", then "Run anyway".
+
+That warning is about the missing signature, not about anything found in the
+file. If you would rather avoid it entirely, use the manual install above -
+copying a folder never triggers SmartScreen.
+
+
+REQUIREMENTS
+------------
+
+Windows 10 or 11, 64-bit
+A VST3 host, or run the standalone
+
+
+WHAT IT DOES
+------------
+
+Six stages, always in this order, laid out left to right the way the audio
+travels:
+
+  TONE    broad low and high shelves plus a tilt
+  GLUE    transparent stereo-linked bus compression
+  CLIP    oversampled clipping
+  GLO     the macro - sets how deeply the whole chain works
+  WIDTH   mono-compatible mid/side
+  LIMIT   true-peak look-ahead limiting
+
+GLO is not a volume knob. It scales how hard every enabled stage works: at 100%
+the chain does exactly what the module knobs say, at 0% it does nothing.
+
+
+ONE THING TO KNOW ABOUT DITHER
+------------------------------
+
+Turning dither on quantises the output to the word length you pick. That is
+what dither is for, but it means you should switch it on only in the LAST
+plugin of your FINAL export - not while you are working.
+
+
+YOUR PRESETS
+------------
+
+Presets you save live here:
+
+  %APPDATA%\Diamond Loopz\SourceGlo Pro\Presets
+
+Updates never touch that folder. The twelve factory presets cannot be
+overwritten. Every one is a starting point with headroom left in it - none is a
+finished master.
+
+
+UNINSTALLING
+------------
+
+Manual install: delete the .vst3 folder and the .exe with its Assets folder.
+Installer: use Add or Remove Programs.
+
+Your saved presets are left alone either way.
+
+
+SUPPORT
+-------
+
+Diamond Loopz
+https://diamondloopz.com

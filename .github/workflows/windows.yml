@@ -6,6 +6,11 @@
 #
 #  The build is verified on the runner with pluginval, which is the Windows
 #  counterpart of the `auval` check used for the Audio Unit.
+#
+#  This workflow uploads NO artifacts. Artifacts are billed against the Actions
+#  storage quota and a full quota makes the upload fail the whole job, so the
+#  deliverable goes to Releases (which is not billed against that quota) and
+#  the logs go to the run summary.
 # =============================================================================
 
 name: Windows
@@ -14,6 +19,15 @@ on:
   workflow_dispatch:          # run it by hand from the Actions tab
   push:
     branches: [main, master]
+
+# Creating a release needs write access to repository contents. If this step
+# ever fails with 403, the repo-level setting is the cap: Settings > Actions >
+# General > Workflow permissions > "Read and write permissions".
+permissions:
+  contents: write
+
+env:
+  VERSION: "1.0.0"
 
 jobs:
   build:
@@ -133,12 +147,30 @@ jobs:
             ForEach-Object { Write-Host $_.Line }
           Get-Content pluginval-8.log -Tail 25
 
-      - name: Upload pluginval logs
+      # The pluginval logs go to the run summary, not to an artifact.
+      #
+      # Artifacts are billed against the Actions storage quota, and when that
+      # quota is full the upload does not warn - it FAILS THE JOB. That is what
+      # stopped the release being published: a few kB of log took the whole run
+      # down before it ever reached the publish step, with the build and the
+      # validation already green.
+      #
+      # The summary costs nothing against any quota, cannot fail the run, and
+      # is easier to read than downloading a zip of text files.
+      - name: Show pluginval results in the run summary
         if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: pluginval-logs
-          path: pluginval-*.log
+        shell: pwsh
+        run: |
+          foreach ($log in @("pluginval-5.log", "pluginval-8.log")) {
+            if (Test-Path $log) {
+              Add-Content $env:GITHUB_STEP_SUMMARY "<details><summary>$log (last 80 lines)</summary>"
+              Add-Content $env:GITHUB_STEP_SUMMARY ""
+              Add-Content $env:GITHUB_STEP_SUMMARY '```'
+              Get-Content $log -Tail 80 | Add-Content $env:GITHUB_STEP_SUMMARY
+              Add-Content $env:GITHUB_STEP_SUMMARY '```'
+              Add-Content $env:GITHUB_STEP_SUMMARY "</details>"
+            }
+          }
 
       - name: Build installer (unsigned)
         shell: pwsh
@@ -192,35 +224,54 @@ jobs:
           Copy-Item packaging\windows\INSTALL.txt $stage
           Copy-Item packaging\windows\license.txt $stage
 
-          Compress-Archive -Path $stage -DestinationPath "SourceGloPro-1.0.0-Windows.zip" -Force
+          Compress-Archive -Path $stage -DestinationPath "SourceGloPro-1.0.1-Windows.zip" -Force
           Write-Host "--- ZIP contents ---"
           Get-ChildItem -Recurse $stage | ForEach-Object { $_.FullName.Replace((Get-Location).Path, "") }
 
-      - name: Upload distribution ZIP
-        uses: actions/upload-artifact@v4
-        with:
-          name: SourceGloPro-Windows-DISTRIBUTE-THIS
-          path: SourceGloPro-1.0.0-Windows.zip
-          if-no-files-found: error
+      # Published to Releases rather than uploaded as an artifact.
+      #
+      # Actions artifacts are billed against the Actions storage quota and a
+      # ~90 MB ZIP on every push fills it fast. Release assets do not count
+      # against that quota at all, they never expire, and they give a stable
+      # download URL instead of one that dies with the run.
+      #
+      # gh is preinstalled on GitHub runners, so this needs no third-party
+      # action. The release is created once per version and the asset is
+      # clobbered on re-runs, so pushing twice updates the file rather than
+      # accumulating copies.
+      - name: Publish the Windows build to Releases
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $tag = "v$env:VERSION"
+          $zip = "SourceGloPro-$env:VERSION-Windows.zip"
 
-      - name: Upload plugin
-        uses: actions/upload-artifact@v4
-        with:
-          name: SourceGloPro-Windows-VST3
-          path: build-cmake/SourceGloPro_artefacts/Release/VST3/
-          if-no-files-found: error
+          if (-not (Test-Path $zip)) { throw "$zip was never produced" }
 
-      - name: Upload standalone
-        uses: actions/upload-artifact@v4
-        with:
-          name: SourceGloPro-Windows-Standalone
-          path: build-cmake/SourceGloPro_artefacts/Release/Standalone/
-          if-no-files-found: error
+          # gh release view exits non-zero when the release does not exist,
+          # which is the check - not an error.
+          $ErrorActionPreference = 'Continue'
+          gh release view $tag *> $null
+          $exists = ($LASTEXITCODE -eq 0)
+          $ErrorActionPreference = 'Stop'
 
-      - name: Upload installer
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: SourceGloPro-Windows-Installer
-          path: build/windows/*.exe
-          if-no-files-found: warn
+          if (-not $exists) {
+            Write-Host "creating release $tag"
+            # --notes-file, not an inline here-string: a PowerShell here-string
+            # needs its closing "@ at column 0, and a column-0 line inside a
+            # YAML block scalar ends the block and breaks the workflow file.
+            gh release create $tag `
+              --title "SourceGlo Pro $env:VERSION (Windows)" `
+              --notes-file packaging/windows/RELEASE-NOTES.md
+          }
+
+          Write-Host "uploading $zip to $tag"
+          gh release upload $tag $zip --clobber
+
+          $url = gh release view $tag --json url --jq .url
+          Write-Host "`nDownload: $url"
+          echo "### Windows build published" >> $env:GITHUB_STEP_SUMMARY
+          echo "" >> $env:GITHUB_STEP_SUMMARY
+          echo "[$zip]($url)" >> $env:GITHUB_STEP_SUMMARY
