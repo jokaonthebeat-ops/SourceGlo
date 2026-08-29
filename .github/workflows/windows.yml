@@ -245,7 +245,13 @@ jobs:
           Copy-Item packaging\windows\INSTALL.txt $stage
           Copy-Item packaging\windows\license.txt $stage
 
-          Compress-Archive -Path $stage -DestinationPath "SourceGloPro-1.0.1-Windows.zip" -Force
+          # Named from $env:VERSION, never a literal: the publish step below
+          # looks the file up by that same variable, and a hardcoded version
+          # left over from the port meant the ZIP was written as 1.0.1 while
+          # the publish step searched for 1.0.0 and failed with "was never
+          # produced" - after a green build and a green pluginval.
+          Compress-Archive -Path $stage `
+            -DestinationPath "SourceGloPro-$env:VERSION-Windows.zip" -Force
           Write-Host "--- ZIP contents ---"
           Get-ChildItem -Recurse $stage | ForEach-Object { $_.FullName.Replace((Get-Location).Path, "") }
 
