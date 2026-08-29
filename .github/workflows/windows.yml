@@ -90,16 +90,37 @@ jobs:
       # POST_BUILD copy ever lands somewhere else, every control in the plugin
       # silently falls back to its vector stand-in - and a screenshot is the
       # only way anyone would notice. Check it here instead.
+      # Checks THIS product's own files. The paths were carried over from
+      # MasterGlo on the first port and pointed at its knob filmstrip
+      # (Knobs\Filmstrips\knob_glo_...), which does not exist here - the run
+      # failed even though the artwork had shipped correctly.
       - name: Check the artwork shipped
         shell: pwsh
         run: |
-          $strip = Join-Path $env:VST3_PATH "Contents\Resources\Assets\Knobs\Filmstrips\knob_glo_280x280_128_vertical.png"
-          if (-not (Test-Path $strip)) {
-            Get-ChildItem -Recurse $env:VST3_PATH | Select-Object -First 40 |
+          $required = @(
+            "Contents\Resources\Assets\Base\sourceglo_shell_1491x1055.png",
+            "Contents\Resources\Assets\Controls\knobs\macro_knob_96px_128frames.png",
+            "Contents\Resources\Assets\Brand\sourceglo_pro_premium_logo_header_640x84.png"
+          )
+
+          $missing = @()
+          foreach ($rel in $required) {
+            $full = Join-Path $env:VST3_PATH $rel
+            if (Test-Path $full) { Write-Host "ok: $rel" }
+            else                 { $missing += $rel }
+          }
+
+          if ($missing.Count -gt 0) {
+            Write-Host "`nMissing:"
+            $missing | ForEach-Object { Write-Host "  $_" }
+            Write-Host "`nWhat the bundle actually contains:"
+            Get-ChildItem -Recurse $env:VST3_PATH | Select-Object -First 60 |
               ForEach-Object { Write-Host $_.FullName }
             throw "artwork missing from the VST3 bundle"
           }
-          Write-Host "artwork present: $strip"
+
+          $count = (Get-ChildItem -Recurse -File (Join-Path $env:VST3_PATH "Contents\Resources\Assets")).Count
+          Write-Host "`nartwork present: $count files"
 
       # pluginval instantiates the plugin, sweeps parameters, renders audio at
       # several sample rates and buffer sizes, and checks state round-trips.
